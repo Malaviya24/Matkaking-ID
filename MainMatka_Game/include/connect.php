@@ -50,8 +50,9 @@ $db_host = required_env('MAINMATKA_DB_HOST');
 $db_user = required_env('MAINMATKA_DB_USER');
 $db_pass = env_or_default('MAINMATKA_DB_PASS', '');
 $db_name = required_env('MAINMATKA_DB_NAME');
+$db_port = (int) env_or_default('MAINMATKA_DB_PORT', '3306');
 
-$con = mysqli_connect($db_host, $db_user, $db_pass, $db_name) or die("Error " . mysqli_error($con));
+$con = mysqli_connect($db_host, $db_user, $db_pass, $db_name, $db_port) or die("Error " . mysqli_error($con));
 
 // Public website base. Keep the default relative so local/admin navigation never jumps to a live domain.
 define('SITEURL', env_or_default('MAINMATKA_SITE_URL', './'));
