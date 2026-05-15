@@ -19,7 +19,10 @@ __pycache__/
 *.pyc
 .wdm/
 
-# Docker volumes
+# Docker (not needed for local)
+docker-compose.yml
+MainMatka_Game/Dockerfile
+MainMatka_Game/.dockerignore
 db_data/
 
 # Tools (large binaries)
@@ -30,3 +33,7 @@ MainMatka_Game/.git/
 
 # Remote admin panel (merged into main)
 Remote-Test-AdminPanel/
+
+# Temp/cache files
+MainMatka_Game/aacachetemp.txt
+*.zip
