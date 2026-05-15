@@ -5,6 +5,7 @@ Stores market names, open/close times, and results into MySQL.
 Handles "loading..." states by preserving last known result.
 """
 
+import os
 import re
 import time
 import logging
@@ -26,11 +27,11 @@ SCRAPE_URL = "https://dpboss-king.vercel.app/"
 SCRAPE_INTERVAL = 5  # seconds
 
 DB_CONFIG = {
-    "host": "127.0.0.1",
-    "user": "root",
-    "password": "",
-    "database": "mainmatka",
-    "port": 3306,
+    "host": os.environ.get("MAINMATKA_DB_HOST", "127.0.0.1"),
+    "user": os.environ.get("MAINMATKA_DB_USER", "root"),
+    "password": os.environ.get("MAINMATKA_DB_PASS", ""),
+    "database": os.environ.get("MAINMATKA_DB_NAME", "mainmatka"),
+    "port": int(os.environ.get("MAINMATKA_DB_PORT", "3306")),
 }
 
 # Markets to skip (not real markets)
