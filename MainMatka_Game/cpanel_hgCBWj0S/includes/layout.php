@@ -24,9 +24,10 @@ function admin_render_header($title)
     .admin-hamburger{display:none;background:none;border:none;color:#fff;font-size:24px;cursor:pointer;padding:8px;line-height:1;}
     @media(max-width:768px){
         .admin-hamburger{display:block;}
-        .admin-sidebar{transform:translateX(-100%);transition:transform .3s ease;z-index:1000;width:260px;}
-        .admin-sidebar.open{transform:translateX(0);}
-        .admin-main{margin-left:0 !important;width:100% !important;}
+        .admin-sidebar{position:fixed !important;left:0;top:0;bottom:0;transform:translateX(-100%);transition:transform .3s ease;z-index:1000;width:260px;}
+        .admin-sidebar.open{transform:translateX(0) !important;}
+        .admin-shell{display:block !important;}
+        .admin-main{margin-left:0 !important;width:100% !important;min-width:0 !important;}
         .admin-topbar{flex-wrap:wrap;gap:8px;padding:12px 16px !important;}
         .admin-topbar h1{font-size:18px !important;}
         .admin-kicker{display:none;}
