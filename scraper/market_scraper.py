@@ -208,7 +208,17 @@ def get_driver():
         options.add_argument("--disable-images")
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
-        service = Service(ChromeDriverManager().install())
+        # Use Chrome for Testing (auto-matched version)
+        from selenium.webdriver.chrome.service import Service as ChromeService
+        from webdriver_manager.chrome import ChromeDriverManager
+        from webdriver_manager.core.os_manager import ChromeType
+
+        try:
+            service = ChromeService(ChromeDriverManager(chrome_type=ChromeType.GOOGLE).install())
+        except Exception:
+            # Fallback: try to find chromedriver in PATH
+            service = ChromeService()
+
         _driver = webdriver.Chrome(service=service, options=options)
         _driver.set_page_load_timeout(30)
         log.info("Chrome headless browser initialized.")
