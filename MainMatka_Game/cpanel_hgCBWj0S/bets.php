@@ -132,7 +132,16 @@ admin_render_header('Bet Reports');
         </label>
         <label class="field">
             <span>Bet Type</span>
-            <input type="text" name="game_type" value="<?php echo e($filters['game_type']); ?>" placeholder="single, jodi">
+            <select name="game_type">
+                <option value="">All</option>
+                <option value="single" <?php echo $filters['game_type'] === 'single' ? 'selected' : ''; ?>>Single</option>
+                <option value="jodi" <?php echo $filters['game_type'] === 'jodi' ? 'selected' : ''; ?>>Jodi</option>
+                <option value="single_patti" <?php echo $filters['game_type'] === 'single_patti' ? 'selected' : ''; ?>>Single Patti</option>
+                <option value="double_patti" <?php echo $filters['game_type'] === 'double_patti' ? 'selected' : ''; ?>>Double Patti</option>
+                <option value="triple_patti" <?php echo $filters['game_type'] === 'triple_patti' ? 'selected' : ''; ?>>Triple Patti</option>
+                <option value="half_sangam" <?php echo $filters['game_type'] === 'half_sangam' ? 'selected' : ''; ?>>Half Sangam</option>
+                <option value="full_sangam" <?php echo $filters['game_type'] === 'full_sangam' ? 'selected' : ''; ?>>Full Sangam</option>
+            </select>
         </label>
         <label class="field">
             <span>User</span>

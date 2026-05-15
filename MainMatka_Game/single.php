@@ -67,7 +67,7 @@ if (isset($_POST['single_submit']) && isset($_SESSION['usr_id'])!="") {
                 {
                     $bets[(string) $i] = $_POST['single'.$i] ?? 0;
                 }
-                $placed = app_place_bets($user_id, $game_id, 'single', $bets, 0);
+                $placed = app_place_bets($user_id, $game_id, 'single', $bets, 0, $default_game);
     
                 if($placed['ok']){
                     //echo "<script>alert('Bidding Successfully Submited')</script>";

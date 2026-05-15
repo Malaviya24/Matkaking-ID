@@ -5,6 +5,9 @@
         </button> 
         <a href="index.php" class="nav-brand-home" aria-label="Go to homepage">&nbsp;&nbsp; MainMatka</a>
         <?php if(isset($_SESSION['usr_id'])!="") { ?>
+        <a href="notifications.php" class="btn btn-white d-inline-block" type="button" style="margin-right:6px;padding:6px 10px;" title="Notifications">
+            <i class="fa fa-bell"></i>
+        </a>
         <a href="add-fund.php" class="btn btn-white d-inline-block ml-auto" type="button">
             <i class="fa fa-money"></i> <span class="walletamt"> <?php echo number_format(get_lastBalance($_SESSION['usr_id'])); ?></span>
         </a>

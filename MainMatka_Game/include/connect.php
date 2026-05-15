@@ -289,7 +289,7 @@ function app_user_withdrawable_amount($userId)
     return max(0.0, app_money_value($row['withdrawable'] ?? 0));
 }
 
-function app_place_bets($userId, $gameId, $gameType, array $bets, $starline = 0)
+function app_place_bets($userId, $gameId, $gameType, array $bets, $starline = 0, $sessionType = '')
 {
     global $con;
 
@@ -339,7 +339,7 @@ function app_place_bets($userId, $gameId, $gameType, array $bets, $starline = 0)
         return ['ok' => false, 'reason' => 'insufficient'];
     }
 
-    $insert = mysqli_prepare($con, "INSERT INTO user_transaction(user_id,game_id,game_type,digit,date,time,amount,type,debit_credit,balance,starline) VALUES(?,?,?,?,?,?,?,'bid','debit',?,?)");
+    $insert = mysqli_prepare($con, "INSERT INTO user_transaction(user_id,game_id,game_type,session_type,digit,date,time,amount,type,debit_credit,balance,starline) VALUES(?,?,?,?,?,?,?,?,'bid','debit',?,?)");
     if (!$insert) {
         mysqli_rollback($con);
         return ['ok' => false, 'reason' => 'insert'];
@@ -349,10 +349,11 @@ function app_place_bets($userId, $gameId, $gameType, array $bets, $starline = 0)
         $balance = round($balance - $row['amount'], 2);
         mysqli_stmt_bind_param(
             $insert,
-            'iissssddi',
+            'iisssssddi',
             $userId,
             $gameId,
             $gameType,
+            $sessionType,
             $row['digit'],
             $date,
             $time,

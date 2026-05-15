@@ -80,28 +80,53 @@ if($_GET['page'] >0)
                 ?>
                 <div class="card shadow-sm mb-3 border-0 transition" style="border-radius: 16px;">
                     <div class="card-header bg-white border-0 pt-3 pb-0 d-flex justify-content-between align-items-center" style="border-radius: 16px 16px 0 0;">
-                        <h6 class="font-weight-bold mb-0 text-dark"><?php echo $row['game_name'];?> <span class="badge badge-light text-uppercase border" style="font-size:10px; color:var(--secondary-color);"><?php echo $row['game_type'];?></span></h6>
+                        <h6 class="font-weight-bold mb-0 text-dark"><?php echo $row['game_name'];?> <span class="badge badge-light text-uppercase border" style="font-size:10px; color:var(--secondary-color);"><?php echo $row['game_type'];?></span>
+                        <?php if (!empty($row['session_type'])) { ?>
+                            <span class="badge" style="font-size:9px;background:<?php echo $row['session_type']=='open' ? 'rgba(104,211,145,.15);color:#68d391' : 'rgba(246,173,85,.15);color:#f6ad55'; ?>;padding:2px 6px;border-radius:4px;"><?php echo ucfirst($row['session_type']); ?></span>
+                        <?php } ?>
+                        </h6>
                         <span class="text-muted" style="font-size:11px;">#<?php echo $row['id'];?></span>
                     </div>
                     <div class="card-body p-3">
                         <div class="row text-center mb-3">
-                            <div class="col-6 border-right">
-                                <span class="text-muted d-block" style="font-size:11px;">Digit Selected</span>
+                            <div class="col-4 border-right">
+                                <span class="text-muted d-block" style="font-size:11px;">Number</span>
                                 <h4 class="font-weight-bold text-dark mb-0"><?php echo $row['digit'];?></h4>
                             </div>
-                            <div class="col-6">
-                                <span class="text-muted d-block" style="font-size:11px;">Points Bet</span>
+                            <div class="col-4 border-right">
+                                <span class="text-muted d-block" style="font-size:11px;">Bet Amount</span>
                                 <h4 class="font-weight-bold mb-0" style="color:var(--primary-color);">₹<?php echo app_format_money($row['amount']);?></h4>
                             </div>
+                            <div class="col-4">
+                                <span class="text-muted d-block" style="font-size:11px;">Win Amount</span>
+                                <?php
+                                // Calculate potential/actual win
+                                $bet_amt = (float)$row['amount'];
+                                $game_type = $row['game_type'];
+                                $rates = ['single'=>9,'jodi'=>95,'single_patti'=>140,'double_patti'=>280,'triple_patti'=>600,'half_sangam'=>1000,'full_sangam'=>10000];
+                                $rate = $rates[$game_type] ?? 0;
+                                $potential_win = $bet_amt * $rate;
+                                
+                                if($row['win']!='' && $row['win']!='NULL' && $row['win']!='0'){
+                                    // Actually won
+                                    echo '<h4 class="font-weight-bold mb-0" style="color:#38a169;">₹'.app_format_money($row['win']).'</h4>';
+                                } elseif($row['win']=='0') {
+                                    echo '<h4 class="font-weight-bold mb-0" style="color:#e53e3e;">₹0</h4>';
+                                } else {
+                                    // Pending - show potential
+                                    echo '<h4 class="font-weight-bold mb-0" style="color:#68d391;">₹'.app_format_money($potential_win).'</h4>';
+                                }
+                                ?>
+                            </div>
                         </div>
-                        <div class="d-flex justify-content-between border-top pt-2">
-                            <small class="text-muted font-weight-bold" style="font-size:11px;"><i class="fa fa-calendar-o"></i> <?php echo date('d M Y',strtotime($row['date']));?></small>
-                            <?php if($row['win']=='' || $row['win']=='NULL'){?>
-                                <small class="text-warning font-weight-bold" style="font-size:12px;"><i class="fa fa-hourglass-half"></i> Pending</small>
+                        <div class="d-flex justify-content-between border-top pt-2 align-items-center">
+                            <small class="text-muted font-weight-bold" style="font-size:11px;"><i class="fa fa-calendar-o"></i> <?php echo date('d M Y',strtotime($row['date']));?> <?php echo $row['time'] ?? '';?></small>
+                            <?php if($row['win']=='' || $row['win']=='NULL' || $row['win']===null){?>
+                                <span style="background:rgba(232,184,74,.15);color:#f6ad55;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;"><i class="fa fa-check-circle"></i> Bet Placed</span>
                             <?php }elseif($row['win']=='0'){ ?>
-                                <small class="text-danger font-weight-bold" style="font-size:12px;"><i class="fa fa-times-circle"></i> Loss</small>
+                                <span style="background:rgba(229,62,62,.12);color:#fc8181;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;"><i class="fa fa-times-circle"></i> You Lost</span>
                             <?php }else{ ?>
-                                <small class="text-success font-weight-bold" style="font-size:12px;"><i class="fa fa-trophy"></i> Won ₹<?php echo app_format_money($row['win']); ?></small>
+                                <span style="background:rgba(56,161,105,.12);color:#68d391;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;"><i class="fa fa-trophy"></i> You Won!</span>
                             <?php } ?>
                         </div>
                     </div>

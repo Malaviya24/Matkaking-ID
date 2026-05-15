@@ -1,82 +1,65 @@
 <?php
 require_once __DIR__ . '/include/session-bootstrap.php';
 include("include/connect.php");
-    include("include/session.php");
-	include("include/functions.php");
-	
-
+include("include/session.php");
+include("include/functions.php");
+app_restore_session_from_cookies();
 ?>
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-
-    <title>Notifications - <?php echo $site_title;?></title>
-    <meta name="description" content="Latest Notification list of <?php echo $site_title;?>">
+    <title>Notifications - <?php echo $site_title; ?></title>
     <?php include("include/head.php"); ?>
 </head>
-
-<body>
-
+<body class="page-notifications">
     <div class="wrapper">
-        
         <?php include("include/sidebar.php"); ?>
         <div id="content">
             <?php include("include/nav.php"); ?>
-            
-            <div class="container" > 
-            <div class="text-center tb-10 mt-3 mb-4">
-                <div style="width: 60px; height: 60px; background: #ebf4ff; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">
-                    <i class="fa fa-bell" style="font-size: 28px; color: var(--primary-color);"></i>
+
+            <div class="container">
+                <div class="text-center tb-10">
+                    <h3 class="gdash3"><i class="fa fa-bell"></i> Notifications</h3>
                 </div>
-                <h3 class="font-weight-bold" style="color: var(--primary-color);">Notifications</h3>
-                <span class="text-muted" style="font-size:13px;">Latest updates and alerts</span>
-            </div>
-            
-        <?php
-        $today_date = date('Y-m-d');
-        $result = mysqli_query($con,"SELECT * FROM notification order by id DESC limit 50");
-		if(mysqli_num_rows($result)>0){
-                 
-            while ($row = mysqli_fetch_array($result)){
-            ?> 
-            <div class="card shadow-sm border-0 mb-3 transition notification-list-card" style="border-radius: 16px;">
-                <div class="card-body p-3">
-                    <div class="d-flex flex-row align-items-start notification-card-row notification-card__row">
-                        <div class="notification-card__icon flex-shrink-0">
-                            <img src="assets/icons/notification.png" alt="" class="notification-card__icon-img" width="40" height="40">
-                        </div>
-                        <div class="notification-card__main flex-grow-1 pl-0" style="min-width:0;">
-                            <div class="d-flex justify-content-between align-items-start notification-card__headline">
-                                <h6 class="mb-0 pr-2 font-weight-bold text-dark notification-card__title"><?php echo $row['title'];?></h6>
-                                <small class="notification-card__date flex-shrink-0 text-nowrap"><i class="fa fa-clock-o"></i> <?php echo date('d M Y, h:i A',strtotime($row['date'].' '.$row['time']));?></small>
+
+                <div class="tb-10">
+                <?php
+                $notif_result = mysqli_query($con, "SELECT * FROM notification ORDER BY id DESC LIMIT 50");
+                if ($notif_result && mysqli_num_rows($notif_result) > 0) {
+                    while ($notif = mysqli_fetch_assoc($notif_result)) {
+                ?>
+                    <div class="card shadow-sm border-0 mb-3" style="background:rgba(10,27,54,.95);border:1px solid rgba(232,184,74,.15) !important;border-radius:12px;">
+                        <div class="card-body p-3">
+                            <div style="display:flex;align-items:flex-start;gap:12px;">
+                                <div style="flex:0 0 36px;width:36px;height:36px;border-radius:50%;background:linear-gradient(145deg,#f0d27a,#caa64a);display:flex;align-items:center;justify-content:center;">
+                                    <i class="fa fa-bell" style="color:#1a1200;font-size:16px;"></i>
+                                </div>
+                                <div style="flex:1;min-width:0;">
+                                    <h6 style="color:#f6ad55;font-weight:700;margin:0 0 4px;font-size:14px;"><?php echo htmlspecialchars($notif['title'] ?? '', ENT_QUOTES, 'UTF-8'); ?></h6>
+                                    <p style="color:rgba(255,255,255,.75);font-size:13px;margin:0 0 6px;line-height:1.4;"><?php echo htmlspecialchars($notif['description'] ?? $notif['message'] ?? '', ENT_QUOTES, 'UTF-8'); ?></p>
+                                    <small style="color:rgba(255,255,255,.35);font-size:11px;">
+                                        <i class="fa fa-clock-o"></i> <?php echo htmlspecialchars(($notif['date'] ?? '') . ' ' . ($notif['time'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
+                                    </small>
+                                </div>
                             </div>
-                            <p class="mb-0 mt-2 notification-card__desc"><?php echo $row['description'];?></p>
                         </div>
                     </div>
+                <?php
+                    }
+                } else {
+                ?>
+                    <div class="text-center" style="padding:40px 20px;color:rgba(255,255,255,.5);">
+                        <i class="fa fa-bell-slash" style="font-size:40px;display:block;margin-bottom:12px;opacity:.4;"></i>
+                        <p>No notifications yet</p>
+                    </div>
+                <?php } ?>
                 </div>
             </div>
-            <?php } ?>
-            
-        <?php }else{ ?>
-             
-            <div class="tbmar-40 text-center">
-                <p>No record found</p>
-            </div>
-        <?php } ?>    
 
-            </div>
-            </div>
-      
-        <br><br><br>  
         </div>
     </div>
-    
     <?php include("include/footer.php"); ?>
-
 </body>
-
 </html>

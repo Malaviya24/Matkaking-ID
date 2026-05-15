@@ -394,7 +394,7 @@ app_restore_session_from_cookies();
                         <h2 class="home-hero__title">Let&rsquo;s Start Playing Now</h2>
                         <p class="home-hero__sub">Chose your favourite game</p>
                         <div class="home-hero__actions">
-                            <a href="starline-play.php" class="home-hero__btn-starline">Starline</a>
+                            <a href="javascript:void(0)" class="home-hero__btn-starline" style="opacity:0.5;cursor:not-allowed;">Starline</a>
                             <a href="add-fund.php" class="home-hero__btn-deposit">Deposit</a>
                         </div>
                     </div>
@@ -412,7 +412,10 @@ app_restore_session_from_cookies();
 
 
             <div class="container text-center">
-                <div class="tb-10">
+                <div style="padding:10px 0 5px;">
+                    <input type="text" id="marketSearch" placeholder="🔍 Search market name..." autocomplete="off" style="width:100%;padding:10px 16px;border-radius:10px;border:1px solid rgba(232,184,74,.3);background:rgba(10,27,54,.95);color:#fff;font-size:14px;outline:none;" onfocus="this.style.borderColor='rgba(232,184,74,.7)'" onblur="this.style.borderColor='rgba(232,184,74,.3)'">
+                </div>
+                <div class="tb-10" id="marketList">
 
                      <?php
                     $games_list_qry =  "SELECT * FROM `parent_games` WHERE status=1 order by order_of_display";
@@ -586,6 +589,27 @@ app_restore_session_from_cookies();
     <?php } ?>
 
     <?php include("include/footer.php"); ?>
+
+    <script>
+    (function(){
+        var search = document.getElementById('marketSearch');
+        if (!search) return;
+        search.addEventListener('input', function(){
+            var q = this.value.toLowerCase().trim();
+            var cards = document.querySelectorAll('#marketList .game-card-new');
+            cards.forEach(function(card){
+                var name = card.querySelector('.game-title');
+                if (!name) return;
+                if (q === '' || name.textContent.toLowerCase().indexOf(q) !== -1) {
+                    card.style.display = '';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        });
+    })();
+    </script>
+
     <div class="wts-flt-btn">
 
         <a href="https://wa.me/<?php echo get_SettingValue('PWA_whatsapp2'); ?>"><i class="fa fa-whatsapp"></i>
