@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: mainmatka-app
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: MAINMATKA_DB_HOST
+        sync: false
+      - key: MAINMATKA_DB_USER
+        sync: false
+      - key: MAINMATKA_DB_PASS
+        sync: false
+      - key: MAINMATKA_DB_NAME
+        sync: false
+      - key: MAINMATKA_SITE_URL
+        sync: false
+      - key: MAINMATKA_SITE_DOMAIN
+        sync: false
+      - key: MAINMATKA_ADMIN_USERNAME
+        sync: false
+      - key: MAINMATKA_ADMIN_PASSWORD_HASH
+        sync: false
+      - key: TZ
+        value: Asia/Kolkata
