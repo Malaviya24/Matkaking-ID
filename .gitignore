@@ -1,0 +1,32 @@
+# Environment
+.env
+MainMatka_Game/include/local-config.php
+
+# Logs
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+.kiro/
+
+# Python
+__pycache__/
+*.pyc
+.wdm/
+
+# Docker volumes
+db_data/
+
+# Tools (large binaries)
+tools/
+
+# Embedded git
+MainMatka_Game/.git/
+
+# Remote admin panel (merged into main)
+Remote-Test-AdminPanel/

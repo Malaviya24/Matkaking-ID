@@ -1,0 +1,22 @@
+{
+ "name": "MainMatka",
+ "short_name": "MainMatka",
+  "theme_color": "#720d5d",
+  "background_color": "#2F0825",
+  "display": "standalone",
+ "icons":[
+    {
+    "src":"assets/icons/196.png",                     
+    "sizes":"196x196",
+    "type":"image/png",
+    "purpose": "any maskable"
+    },
+    {
+    "src":"assets/icons/512.png",
+    "sizes":"512x512",
+    "type":"image/png",
+    "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/?utm_source=launcher"
+}

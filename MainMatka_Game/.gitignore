@@ -1,0 +1,6 @@
+.env
+local-config.php
+include/local-config.php
+__MACOSX/
+._*
+cron_job_log.txt
