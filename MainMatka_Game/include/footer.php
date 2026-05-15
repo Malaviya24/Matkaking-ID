@@ -132,46 +132,11 @@ function clickPanna(el) {
             $('#add_fund_amount').val(addFund_amount);
         });
 
-        // Amount button selection
-        $('.bidamtbox').on('click', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            var bid_amount = $(this).attr('data');
-            // Clear all buttons
-            $('.bidamtbox').removeClass('active selected').removeAttr('style');
-            // Highlight clicked button
-            $(this).addClass('active selected');
-            $(this).attr('style', 'background:linear-gradient(145deg,#f0d27a,#caa64a) !important; border-color:rgba(255,255,255,.25) !important; transform:scale(1.05) !important;');
-            $(this).find('p').attr('style', 'color:#1a1200 !important;');
-            // Set amount
-            $('#selected_amount').val(bid_amount);
-            return false;
-        });
+        // Amount button selection - DISABLED (using inline onclick="selectAmt()" instead)
+        // $('.bidamtbox').on('click', ...);
 
-        // Click on panna input box - add selected amount
-        $(document).on('click', '.pointinputbox', function() {
-            var selected_amount = $('#selected_amount').val();
-            if (selected_amount == '' || selected_amount == '0') {
-                alert('Please Select Amount First');
-                return;
-            }
-            var exist_amount = parseInt($(this).val()) || 0;
-            var total = exist_amount + parseInt(selected_amount);
-            $(this).val(total);
-            recalcTotal();
-        });
-
-        // Allow manual typing in panna input boxes
-        $(document).on('input', '.pointinputbox', function() {
-            var v = $(this).val().replace(/[^0-9]/g, '');
-            $(this).val(v);
-            recalcTotal();
-        });
-
-        // Prevent paste of non-numeric
-        $(document).on('paste', '.pointinputbox', function(e) {
-            e.preventDefault();
-        });
+        // Panna click - DISABLED (using inline onclick="clickPanna()" instead)
+        // $(document).on('click', '.pointinputbox', ...);
 
 
 

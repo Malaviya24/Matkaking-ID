@@ -142,6 +142,7 @@ $recentBets = admin_fetch_all("
     FROM user_transaction ut
     LEFT JOIN games g ON g.id = ut.game_id AND COALESCE(ut.starline, 0) = 0
     LEFT JOIN starline sl ON sl.id = ut.game_id AND COALESCE(ut.starline, 0) = 1
+    LEFT JOIN scraped_markets sm ON sm.id = ut.game_id AND sm.date = ut.date
     WHERE ut.user_id = {$userId} AND ut.type = 'bid'
     ORDER BY ut.id DESC
     LIMIT 30
