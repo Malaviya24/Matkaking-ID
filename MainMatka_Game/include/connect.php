@@ -404,18 +404,32 @@ function app_safe_return_path($encodedReturnUrl)
 
 /**
  * Check if a scraped market is currently accepting bets.
- * Enforces betting flow control based on result_status, session_type, and time.
+ *
+ * NEW BETTING-WINDOW RULE (live-result driven):
+ *   The source site (dpboss-king.vercel.app) maintains a "LIVE RESULT"
+ *   section in the hero area. While a market is listed there, the source
+ *   is actively broadcasting its result-declaration window — we MUST
+ *   stop accepting bets for that market in the matching session.
+ *   When the market disappears from that section, betting resumes
+ *   (subject to the normal session rules below).
  *
  * Decision logic (evaluated in order):
  * 1. result_status='closed' → reject: "Market is closed, no bets accepted"
- * 2. Current time >= (close_time - 10 min) → reject: "Betting cutoff reached"
- * 3. result_status='open_declared' AND session_type='open' → reject: "Open betting is closed for this market"
- * 4. result_status='open_declared' AND session_type='close' AND before cutoff → allow
- * 5. result_status='waiting' AND before cutoff → allow
+ * 2. is_live=1 → reject: "Result is being declared, betting paused"
+ *      ↳ While the market is in the source's LIVE RESULT block, the
+ *        operator is publishing a result. No new bets.
+ * 3. result_status='open_declared' AND session_type='open' → reject:
+ *      "Open betting is closed for this market"
+ * 4. result_status='open_declared' AND session_type='close' → allow
+ * 5. result_status='waiting' → allow
+ *
+ * NOTE: The previous "10 minutes before close_time" cutoff has been
+ * removed. The source site's LIVE RESULT presence is now the single
+ * source of truth for the betting cutoff window.
  *
  * @param int $scraped_market_id  The scraped_markets.id
  * @param string $bet_side  'open' or 'close'
- * @return array ['allowed' => bool, 'reason' => string]
+ * @return array ['allowed' => bool, 'reason' => string, 'market' => array (when allowed)]
  */
 function app_scraped_market_bet_allowed($scraped_market_id, $bet_side = 'open')
 {
@@ -440,28 +454,17 @@ function app_scraped_market_bet_allowed($scraped_market_id, $bet_side = 'open')
 
     $result_status = $market['result_status'] ?? 'waiting';
     $session_type = (string) $bet_side;
+    $is_live = (int) ($market['is_live'] ?? 0);
 
     // 1. Market fully closed — reject all bets immediately
     if ($result_status === 'closed') {
         return ['allowed' => false, 'reason' => 'Market is closed, no bets accepted'];
     }
 
-    // Calculate close_time timestamp and cutoff
-    $now = time();
-    $open_ts = strtotime(date('Y-m-d') . ' ' . $market['open_time']);
-    $close_ts = strtotime(date('Y-m-d') . ' ' . $market['close_time']);
-
-    // Handle overnight markets (close_time < open_time means next day)
-    if ($close_ts < $open_ts) {
-        $close_ts = strtotime(date('Y-m-d', strtotime('+1 day')) . ' ' . $market['close_time']);
-    }
-
-    // Betting cutoff: 10 minutes before close_time
-    $close_cutoff = $close_ts - (10 * 60);
-
-    // 2. Within 10 minutes of close_time — reject all bets
-    if ($now >= $close_cutoff) {
-        return ['allowed' => false, 'reason' => 'Betting cutoff reached'];
+    // 2. Source site has this market in the LIVE RESULT block —
+    //    a result is being declared right now. No bets.
+    if ($is_live === 1) {
+        return ['allowed' => false, 'reason' => 'Result is being declared, betting paused'];
     }
 
     // 3. Open result declared and user wants to bet on open session — reject
@@ -469,8 +472,8 @@ function app_scraped_market_bet_allowed($scraped_market_id, $bet_side = 'open')
         return ['allowed' => false, 'reason' => 'Open betting is closed for this market'];
     }
 
-    // 4. Open result declared, close session, before cutoff — allow
-    // 5. Waiting status, before cutoff — allow
+    // 4. Open result declared, close session — allow
+    // 5. Waiting status — allow
     return ['allowed' => true, 'reason' => '', 'market' => $market];
 }
 

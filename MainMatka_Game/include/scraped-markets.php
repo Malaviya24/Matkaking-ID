@@ -7,7 +7,7 @@
 function get_scraped_markets() {
     global $con;
     $today = date('Y-m-d');
-    $sql = "SELECT id, market_name, market_slug, open_time, close_time, open_panna, open_ank, close_panna, close_ank, jodi, result_status, display_order FROM scraped_markets WHERE date = '$today' AND open_time != '' AND close_time != '' AND display_order > 0 ORDER BY display_order ASC";
+    $sql = "SELECT id, market_name, market_slug, open_time, close_time, open_panna, open_ank, close_panna, close_ank, jodi, result_status, is_live, display_order FROM scraped_markets WHERE date = '$today' AND open_time != '' AND close_time != '' AND display_order > 0 ORDER BY display_order ASC";
     $result = mysqli_query($con, $sql);
     $markets = [];
     if ($result) {
@@ -61,19 +61,17 @@ function render_scraped_markets() {
         $result_display = format_scraped_result($row);
         $market_slug = $row['market_slug'];
 
-        // Betting logic: open all day, close only 10 min before close_time
-        $now = time();
-        $open_ts = strtotime(date('Y-m-d') . ' ' . $row['open_time']);
-        $close_ts = strtotime(date('Y-m-d') . ' ' . $row['close_time']);
-        if ($close_ts < $open_ts) {
-            $close_ts = strtotime(date('Y-m-d', strtotime('+1 day')) . ' ' . $row['close_time']);
-        }
-        $close_cutoff = $close_ts - (10 * 60);
-        $result_done_time = $close_ts + (2 * 60);
-
-        if ($now >= $close_cutoff && $now < $result_done_time) {
+        // Betting flow:
+        //   - Market closed (full result declared)        → betting OFF
+        //   - Market in source's LIVE RESULT block        → betting OFF (result being declared)
+        //   - Otherwise                                   → betting ON (open or close session as appropriate)
+        $is_live = (int) ($row['is_live'] ?? 0);
+        if ($row['result_status'] === 'closed') {
             $bidding_status = 0;
-            $msg = 'Betting is Closed';
+            $msg = 'Market Closed';
+        } elseif ($is_live === 1) {
+            $bidding_status = 0;
+            $msg = 'Result Declaring';
         } else {
             $bidding_status = 1;
             $msg = ($row['result_status'] === 'open_declared') ? 'Betting For Close' : 'Betting Running';

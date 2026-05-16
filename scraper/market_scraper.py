@@ -120,14 +120,30 @@ def ensure_table_exists():
             `jodi` VARCHAR(5) DEFAULT NULL,
             `full_result` VARCHAR(30) DEFAULT NULL,
             `result_status` VARCHAR(20) DEFAULT 'waiting',
+            `is_live` TINYINT(1) NOT NULL DEFAULT 0,
             `last_updated` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             `date` DATE NOT NULL,
             UNIQUE KEY `idx_market_date` (`market_slug`, `date`),
             INDEX `idx_date` (`date`),
-            INDEX `idx_status` (`result_status`)
+            INDEX `idx_status` (`result_status`),
+            INDEX `idx_is_live` (`is_live`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """)
     conn.commit()
+    # Add is_live column for legacy installs that already had the table
+    try:
+        cursor.execute("ALTER TABLE scraped_markets ADD COLUMN is_live TINYINT(1) NOT NULL DEFAULT 0")
+        conn.commit()
+        log.info("Added is_live column to scraped_markets.")
+    except mysql.connector.Error as e:
+        # 1060 = duplicate column, expected on subsequent runs
+        if e.errno != 1060:
+            log.warning(f"Could not add is_live column (may already exist): {e}")
+    try:
+        cursor.execute("CREATE INDEX idx_is_live ON scraped_markets (is_live)")
+        conn.commit()
+    except mysql.connector.Error:
+        pass  # Index probably already exists
     cursor.close()
     conn.close()
     log.info("Table 'scraped_markets' ready.")
@@ -261,6 +277,86 @@ def close_driver():
 
 
 # ─── Scraping ────────────────────────────────────────────────────────────────
+def _extract_live_market_slugs(soup):
+    """
+    Find the LIVE RESULT section on the source page and extract the slugs
+    of the markets currently being broadcast there.
+
+    Source structure (rendered):
+        <h4>☔LIVE RESULT☔</h4>     ← marker
+        <p>Sabse Tezz Live Result Yahi Milega</p>
+        <h4>MILAN DAY</h4>           ← live market
+        <p>245-10-479</p>
+        <button>Refresh</button>
+        <h4>RAJDHANI DAY</h4>        ← live market
+        ...
+        <h4>WORLD ME SABSE FAST SATTA MATKA RESULT</h4>   ← end marker
+
+    The LIVE block sits between the LIVE RESULT heading and the next
+    "non-live" section heading (typically WORLD ME SABSE FAST...).
+
+    Returns a set of normalized slugs (matching scraped_markets.market_slug).
+    """
+    live_slugs = set()
+
+    # Find the LIVE RESULT heading
+    live_heading = None
+    for h in soup.find_all(["h2", "h3", "h4", "h5"]):
+        txt = h.get_text(strip=True)
+        if "LIVE RESULT" in txt.upper():
+            live_heading = h
+            break
+
+    if live_heading is None:
+        return live_slugs
+
+    # End markers — when we hit one of these, the live block is over.
+    # These are headings that appear right after the LIVE block on the
+    # source page. We compare in upper case, ignoring spaces/punctuation.
+    end_marker_keywords = (
+        "WORLD ME SABSE FAST",
+        "DPBOSS SPECIAL",
+        "MAIN STARLINE",
+        "MUMBAI RAJSHREE STAR LINE",
+        "MAIN BOMBAY 36 BAZAR",
+        "MAIN FATA-FAT",
+        "GOLDEN ANK",
+        "FINAL ANK",
+        "MATKA JODI LIST",
+    )
+
+    # Walk forward through subsequent h4-level (or any heading) elements
+    # until we hit an end marker.
+    for el in live_heading.find_all_next(["h2", "h3", "h4", "h5"]):
+        txt = el.get_text(strip=True)
+        if not txt:
+            continue
+        upper = txt.upper()
+        if any(k in upper for k in end_marker_keywords):
+            break
+        # Skip the original LIVE RESULT heading (shouldn't recur, but safety)
+        if "LIVE RESULT" in upper:
+            continue
+        # Skip the tagline if it leaked into a heading
+        if "SABSE TEZZ" in upper or "YAHI MILEGA" in upper:
+            continue
+        # Clean: drop trailing [main] etc, exactly like scrape_markets does
+        name_clean = re.sub(r'\s*\[.*?\]\s*', '', txt).strip()
+        if not name_clean:
+            continue
+        # Defensive: a real market name should be reasonably short and
+        # not contain newlines or obviously non-market text
+        if len(name_clean) < 2 or len(name_clean) > 60:
+            continue
+        if name_clean.upper() in SKIP_MARKETS:
+            continue
+        slug = re.sub(r'[^a-z0-9]+', '-', name_clean.lower()).strip('-')
+        if slug:
+            live_slugs.add(slug)
+
+    return live_slugs
+
+
 def scrape_markets():
     """Scrape all market data from the source website using headless Chrome."""
     try:
@@ -283,6 +379,15 @@ def scrape_markets():
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(page_source, "html.parser")
     markets = []
+
+    # ─── First pass: detect markets currently in LIVE RESULT section ────
+    # When a market appears in this block, the source site is actively
+    # broadcasting its result-declaration window — betting must be CLOSED.
+    # When the market disappears from this block, betting reopens (subject
+    # to the normal session/result_status rules).
+    live_market_slugs = _extract_live_market_slugs(soup)
+    if live_market_slugs:
+        log.info(f"LIVE RESULT block: {len(live_market_slugs)} market(s) currently live: {sorted(live_market_slugs)}")
 
     # Each market is in an h4 heading followed by result and time info
     h4_tags = soup.find_all("h4")
@@ -332,6 +437,7 @@ def scrape_markets():
             "display_order": len(markets) + 1,
             "open_time": open_time,
             "close_time": close_time,
+            "is_live": slug in live_market_slugs,
             **result_data,
         })
 
@@ -419,13 +525,14 @@ def update_database(markets):
 
         # If status is 'waiting' and we already have a result, don't overwrite —
         # UNLESS we detected a fresh-day overwrite above.
+        skip_result_write = False
         if (
             new_status == "waiting"
             and existing
             and existing["result_status"] in ("open_declared", "closed")
             and not is_fresh_day_overwrite
         ):
-            continue
+            skip_result_write = True
 
         # If status is 'open_declared' and existing is 'closed', don't downgrade —
         # UNLESS we detected a fresh-day overwrite (different open_panna).
@@ -435,6 +542,24 @@ def update_database(markets):
             and existing["result_status"] == "closed"
             and not is_fresh_day_overwrite
         ):
+            skip_result_write = True
+
+        # Even when we skip the result-status write, the live flag and timing
+        # info still need to track the source. Update those in isolation.
+        if skip_result_write:
+            new_is_live = 1 if m.get("is_live") else 0
+            existing_is_live = int(existing.get("is_live") or 0) if existing else 0
+            if new_is_live != existing_is_live:
+                cursor.execute(
+                    "UPDATE scraped_markets SET is_live = %s, last_updated = NOW() "
+                    "WHERE market_slug = %s AND date = %s",
+                    (new_is_live, slug, today)
+                )
+                updated += 1
+                if new_is_live:
+                    log.info(f"LIVE FLAG ON: '{m['market_name']}' [{slug}] entered LIVE RESULT block — betting closed.")
+                else:
+                    log.info(f"LIVE FLAG OFF: '{m['market_name']}' [{slug}] left LIVE RESULT block — betting may resume.")
             continue
 
         # ─── Step 1: Detect status transition BEFORE the DB update ────────
@@ -443,7 +568,15 @@ def update_database(markets):
         old_status = detect_status_transition(slug, new_status, today)
 
         # ─── Step 2: Update the database with new market data ─────────────
+        new_is_live = 1 if m.get("is_live") else 0
         if existing:
+            # Track live-flag transitions for visibility
+            existing_is_live = int(existing.get("is_live") or 0)
+            if new_is_live != existing_is_live:
+                if new_is_live:
+                    log.info(f"LIVE FLAG ON: '{m['market_name']}' [{slug}] entered LIVE RESULT block — betting closed.")
+                else:
+                    log.info(f"LIVE FLAG OFF: '{m['market_name']}' [{slug}] left LIVE RESULT block — betting may resume.")
             # Update existing record
             cursor.execute("""
                 UPDATE scraped_markets SET
@@ -458,27 +591,30 @@ def update_database(markets):
                     jodi = %s,
                     full_result = %s,
                     result_status = %s,
+                    is_live = %s,
                     last_updated = NOW()
                 WHERE market_slug = %s AND date = %s
             """, (
                 m["market_name"], m["display_order"], m["open_time"], m["close_time"],
                 m["open_panna"], m["open_ank"], m["close_panna"],
                 m["close_ank"], m["jodi"], m["full_result"],
-                new_status, slug, today
+                new_status, new_is_live, slug, today
             ))
         else:
+            if new_is_live:
+                log.info(f"LIVE FLAG ON: '{m['market_name']}' [{slug}] (new record) — betting closed.")
             # Insert new record
             cursor.execute("""
                 INSERT INTO scraped_markets
                     (market_name, market_slug, display_order, open_time, close_time,
                      open_panna, open_ank, close_panna, close_ank,
-                     jodi, full_result, result_status, date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     jodi, full_result, result_status, is_live, date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 m["market_name"], slug, m["display_order"], m["open_time"], m["close_time"],
                 m["open_panna"], m["open_ank"], m["close_panna"],
                 m["close_ank"], m["jodi"], m["full_result"],
-                new_status, today
+                new_status, new_is_live, today
             ))
 
         updated += 1
