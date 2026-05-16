@@ -70,10 +70,17 @@ SKIP_MARKETS = {
     "MUMBAI RAJSHREE STAR LINE RESULT",
     "MAIN BOMBAY 36 BAZAR",
     "MAIN FATA-FAT15 MINUTES",
+    "MAIN FATA-FAT",
     "GOLDEN ANK",
     "FINAL ANK",
     "DPBOSS SPECIAL GAME ZONE",
     "MATKA JODI LIST",
+    "TODAY LUCKY NUMBER",
+    "SATTA MATKA JODI CHART",
+    "MATKA PANEL CHART",
+    "FREE GAME ZONE OPEN-CLOSE",
+    "NOTICE",
+    "☆ NOTICE ☆",
 }
 
 # ─── Logging ─────────────────────────────────────────────────────────────────
@@ -282,18 +289,9 @@ def _extract_live_market_slugs(soup):
     Find the LIVE RESULT section on the source page and extract the slugs
     of the markets currently being broadcast there.
 
-    Source structure (rendered):
-        <h4>☔LIVE RESULT☔</h4>     ← marker
-        <p>Sabse Tezz Live Result Yahi Milega</p>
-        <h4>MILAN DAY</h4>           ← live market
-        <p>245-10-479</p>
-        <button>Refresh</button>
-        <h4>RAJDHANI DAY</h4>        ← live market
-        ...
-        <h4>WORLD ME SABSE FAST SATTA MATKA RESULT</h4>   ← end marker
-
-    The LIVE block sits between the LIVE RESULT heading and the next
-    "non-live" section heading (typically WORLD ME SABSE FAST...).
+    The source page may render the LIVE block in two ways:
+      A) Each live market as a separate <h4> heading (old layout)
+      B) All live markets as text/paragraphs within a container (new layout)
 
     Returns a set of normalized slugs (matching scraped_markets.market_slug).
     """
@@ -325,8 +323,7 @@ def _extract_live_market_slugs(soup):
         "MATKA JODI LIST",
     )
 
-    # Walk forward through subsequent h4-level (or any heading) elements
-    # until we hit an end marker.
+    # Strategy A: Walk forward through heading elements (old layout)
     for el in live_heading.find_all_next(["h2", "h3", "h4", "h5"]):
         txt = el.get_text(strip=True)
         if not txt:
@@ -334,18 +331,13 @@ def _extract_live_market_slugs(soup):
         upper = txt.upper()
         if any(k in upper for k in end_marker_keywords):
             break
-        # Skip the original LIVE RESULT heading (shouldn't recur, but safety)
         if "LIVE RESULT" in upper:
             continue
-        # Skip the tagline if it leaked into a heading
         if "SABSE TEZZ" in upper or "YAHI MILEGA" in upper:
             continue
-        # Clean: drop trailing [main] etc, exactly like scrape_markets does
         name_clean = re.sub(r'\s*\[.*?\]\s*', '', txt).strip()
         if not name_clean:
             continue
-        # Defensive: a real market name should be reasonably short and
-        # not contain newlines or obviously non-market text
         if len(name_clean) < 2 or len(name_clean) > 60:
             continue
         if name_clean.upper() in SKIP_MARKETS:
@@ -353,6 +345,44 @@ def _extract_live_market_slugs(soup):
         slug = re.sub(r'[^a-z0-9]+', '-', name_clean.lower()).strip('-')
         if slug:
             live_slugs.add(slug)
+
+    # Strategy B: If no headings found, look for market names in text nodes
+    # between the LIVE heading and the end marker. The source may render
+    # live markets as text like "SRIDEVI NIGHT188-7" or "MUMBAI BAZARLoading..."
+    if not live_slugs:
+        for el in live_heading.find_all_next():
+            if el.name in ("h2", "h3", "h4", "h5"):
+                txt = el.get_text(strip=True).upper()
+                if any(k in txt for k in end_marker_keywords):
+                    break
+                if "LIVE RESULT" not in txt:
+                    # This heading IS a live market name (Strategy A already handled)
+                    continue
+            # Look for text that contains a market name followed by a result
+            if el.string:
+                text = el.string.strip()
+            elif el.name in ("p", "span", "div", "button", "a"):
+                text = el.get_text(strip=True)
+            else:
+                continue
+            if not text or len(text) < 4:
+                continue
+            # Pattern: "MARKET NAMEresult" or "MARKET NAMELoading..."
+            # Extract market name by removing trailing result/loading/refresh
+            name_candidate = re.sub(r'(\d{3}-\d{1,2}(-\d{3})?|Loading\.{0,3}|Refresh).*$', '', text).strip()
+            if name_candidate and len(name_candidate) >= 3 and len(name_candidate) <= 60:
+                upper_name = name_candidate.upper()
+                if upper_name in SKIP_MARKETS:
+                    continue
+                if "SABSE TEZZ" in upper_name or "YAHI MILEGA" in upper_name:
+                    continue
+                if "REFRESH" in upper_name or "LOADING" in upper_name:
+                    continue
+                # Only consider if it looks like a market name (mostly letters/spaces)
+                if re.match(r'^[A-Za-z\s\-\.]+$', name_candidate):
+                    slug = re.sub(r'[^a-z0-9]+', '-', name_candidate.lower()).strip('-')
+                    if slug and len(slug) >= 3:
+                        live_slugs.add(slug)
 
     return live_slugs
 
@@ -364,11 +394,11 @@ def scrape_markets():
         driver.get(SCRAPE_URL)
 
         # Wait for market cards to load (h4 elements appear)
-        WebDriverWait(driver, 15).until(
+        WebDriverWait(driver, 20).until(
             EC.presence_of_all_elements_located((By.TAG_NAME, "h4"))
         )
-        # Extra wait for results to populate
-        time.sleep(2)
+        # Extra wait for results to populate (React hydration + API calls)
+        time.sleep(4)
 
         page_source = driver.page_source
     except Exception as e:
@@ -391,6 +421,7 @@ def scrape_markets():
 
     # Each market is in an h4 heading followed by result and time info
     h4_tags = soup.find_all("h4")
+    log.info(f"Found {len(h4_tags)} h4 tags on page")
 
     for h4 in h4_tags:
         market_name = h4.get_text(strip=True)
@@ -404,26 +435,75 @@ def scrape_markets():
         if len(market_name_clean) < 2 or len(market_name_clean) > 80:
             continue
 
-        # Get the parent container to find result and time
-        parent = h4.find_parent()
-        if not parent:
-            continue
-
-        # Get all text content from the parent block
-        all_text = parent.get_text(separator="\n", strip=True)
-        lines = [l.strip() for l in all_text.split("\n") if l.strip()]
+        # ─── Strategy: collect text from next siblings until the next heading.
+        # The source page renders each market as:
+        #   <h4>MARKET NAME</h4>
+        #   <p>result</p>  or text node
+        #   <p>time</p>    or text node
+        #   <a>Jodi</a><a>Panel</a>
+        # We use find_next_siblings + find_all_next to handle both flat and
+        # nested DOM layouts.
 
         result_text = ""
         time_text = ""
 
-        for line in lines:
+        # Collect text lines between this h4 and the next heading
+        collected_lines = []
+        for el in h4.find_all_next():
+            # Stop at the next heading element (next market or section)
+            if el.name in ("h2", "h3", "h4", "h5", "h6"):
+                break
+            # Get direct text of this element (avoid duplicates from children)
+            if el.string:
+                text = el.string.strip()
+                if text and text not in collected_lines:
+                    collected_lines.append(text)
+            elif el.name in ("p", "span", "div", "td") and not el.find(["p", "span", "div"]):
+                # Leaf container — get its full text
+                text = el.get_text(strip=True)
+                if text and text not in collected_lines:
+                    collected_lines.append(text)
+            # Safety limit
+            if len(collected_lines) > 30:
+                break
+
+        for line in collected_lines:
+            # Skip link text like "Jodi", "Panel", "Chart", "Refresh"
+            if line.lower() in ("jodi", "panel", "chart", "refresh"):
+                continue
             # Result pattern: digits-digits-digits or digits-digit
-            if re.match(r'^\d{3}-\d{1,2}(-\d{3})?$', line):
+            if not result_text and re.match(r'^\d{3}-\d{1,2}(-\d{3})?$', line):
                 result_text = line
-            # Time pattern: contains AM/PM with colon
-            elif re.search(r'\d{1,2}:\d{2}\s*[AP]M', line, re.IGNORECASE):
+            # Time pattern: two times with AM/PM (e.g. "11:15 AM 12:15 PM")
+            elif not time_text and re.search(r'\d{1,2}:\d{2}\s*[AP]M', line, re.IGNORECASE):
                 if "AM" in line.upper() or "PM" in line.upper():
                     time_text = line
+
+        # Fallback: try using next sibling elements directly
+        if not result_text or not time_text:
+            for sib in h4.next_siblings:
+                if hasattr(sib, 'name') and sib.name in ("h2", "h3", "h4", "h5", "h6"):
+                    break
+                text = sib.get_text(strip=True) if hasattr(sib, 'get_text') else str(sib).strip()
+                if not text:
+                    continue
+                if not result_text and re.match(r'^\d{3}-\d{1,2}(-\d{3})?$', text):
+                    result_text = text
+                elif not time_text and re.search(r'\d{1,2}:\d{2}\s*[AP]M', text, re.IGNORECASE):
+                    time_text = text
+
+        # Fallback 2: parent container (original approach, for wrapped layouts)
+        if not result_text or not time_text:
+            parent = h4.find_parent()
+            if parent and parent.name not in ("body", "html", "[document]"):
+                all_text = parent.get_text(separator="\n", strip=True)
+                lines = [l.strip() for l in all_text.split("\n") if l.strip()]
+                for line in lines:
+                    if not result_text and re.match(r'^\d{3}-\d{1,2}(-\d{3})?$', line):
+                        result_text = line
+                    elif not time_text and re.search(r'\d{1,2}:\d{2}\s*[AP]M', line, re.IGNORECASE):
+                        if "AM" in line.upper() or "PM" in line.upper():
+                            time_text = line
 
         open_time, close_time = parse_time(time_text)
         result_data = parse_result(result_text)
@@ -442,7 +522,10 @@ def scrape_markets():
         })
 
     # Filter: only keep entries that have valid open/close times
+    pre_filter_count = len(markets)
     markets = [m for m in markets if m["open_time"] and m["close_time"]]
+    if pre_filter_count != len(markets):
+        log.info(f"Filtered {pre_filter_count - len(markets)} markets without valid times (kept {len(markets)})")
 
     return markets
 
