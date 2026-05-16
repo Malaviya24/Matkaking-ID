@@ -81,20 +81,22 @@ function render_scraped_markets() {
         $result_display = format_scraped_result($row);
         $market_slug = $row['market_slug'];
 
-        // Betting flow:
-        //   - Market closed (full result declared)        → betting OFF
-        //   - Market in source's LIVE RESULT block        → betting OFF (result being declared)
-        //   - Otherwise                                   → betting ON (open or close session as appropriate)
+        // Betting flow (always-open model):
+        //   - Market in source's LIVE RESULT block → betting OFF
+        //   - Otherwise → betting ON (if today closed, bets go to tomorrow)
         $is_live = (int) ($row['is_live'] ?? 0);
-        if ($row['result_status'] === 'closed') {
-            $bidding_status = 0;
-            $msg = 'Market Closed';
-        } elseif ($is_live === 1) {
+        if ($is_live === 1) {
             $bidding_status = 0;
             $msg = 'Result Declaring';
         } else {
             $bidding_status = 1;
-            $msg = ($row['result_status'] === 'open_declared') ? 'Betting For Close' : 'Betting Running';
+            if ($row['result_status'] === 'closed') {
+                $msg = 'Bet for Tomorrow';
+            } elseif ($row['result_status'] === 'open_declared') {
+                $msg = 'Betting For Close';
+            } else {
+                $msg = 'Betting Running';
+            }
         }
 ?>
         <div class="game-card-new">

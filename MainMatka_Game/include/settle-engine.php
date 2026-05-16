@@ -174,10 +174,38 @@ function get_pending_bets($market_id, $date, $session_type) {
 	$session_type = (string) $session_type;
 	$bets = [];
 
+	// The game_id stored in user_transaction is the scraped_markets.id from
+	// the day the bet was placed. But the market may have a different id
+	// tomorrow (new row per day). So we also match by any scraped_markets.id
+	// that shares the same market_slug. This handles the "always-open" model
+	// where bets placed today for tomorrow use today's market_id.
+	$all_ids = [$market_id];
+	$slug_stmt = mysqli_prepare($con, "SELECT market_slug FROM scraped_markets WHERE id = ? LIMIT 1");
+	if ($slug_stmt) {
+		mysqli_stmt_bind_param($slug_stmt, 'i', $market_id);
+		mysqli_stmt_execute($slug_stmt);
+		$slug_res = mysqli_stmt_get_result($slug_stmt);
+		$slug_row = $slug_res ? mysqli_fetch_assoc($slug_res) : null;
+		if ($slug_row && !empty($slug_row['market_slug'])) {
+			$ids_stmt = mysqli_prepare($con, "SELECT id FROM scraped_markets WHERE market_slug = ?");
+			if ($ids_stmt) {
+				mysqli_stmt_bind_param($ids_stmt, 's', $slug_row['market_slug']);
+				mysqli_stmt_execute($ids_stmt);
+				$ids_res = mysqli_stmt_get_result($ids_stmt);
+				while ($ids_row = mysqli_fetch_assoc($ids_res)) {
+					$all_ids[] = (int) $ids_row['id'];
+				}
+			}
+		}
+	}
+	$all_ids = array_unique($all_ids);
+	$id_placeholders = implode(',', array_fill(0, count($all_ids), '?'));
+	$id_types = str_repeat('i', count($all_ids));
+
 	if ($session_type === 'close') {
 		// For close settlement: get close-session bets + deferred open-session bets (jodi, half_sangam, full_sangam)
 		$sql = "SELECT * FROM user_transaction 
-				WHERE game_id = ? 
+				WHERE game_id IN ($id_placeholders) 
 				AND date = ? 
 				AND type = 'bid' 
 				AND starline = 0 
@@ -187,16 +215,20 @@ function get_pending_bets($market_id, $date, $session_type) {
 					OR (session_type = 'open' AND game_type IN ('jodi', 'half_sangam', 'full_sangam'))
 				)
 				FOR UPDATE";
+		$bind_types = $id_types . 's';
+		$bind_values = array_merge($all_ids, [$date]);
 	} else {
 		// For open settlement: get open-session bets only
 		$sql = "SELECT * FROM user_transaction 
-				WHERE game_id = ? 
+				WHERE game_id IN ($id_placeholders) 
 				AND date = ? 
 				AND type = 'bid' 
 				AND starline = 0 
 				AND session_type = ? 
 				AND (win IS NULL OR win = '') 
 				FOR UPDATE";
+		$bind_types = $id_types . 'ss';
+		$bind_values = array_merge($all_ids, [$date, $session_type]);
 	}
 
 	$stmt = mysqli_prepare($con, $sql);
@@ -205,12 +237,7 @@ function get_pending_bets($market_id, $date, $session_type) {
 		return $bets;
 	}
 
-	if ($session_type === 'close') {
-		mysqli_stmt_bind_param($stmt, 'is', $market_id, $date);
-	} else {
-		mysqli_stmt_bind_param($stmt, 'iss', $market_id, $date, $session_type);
-	}
-
+	mysqli_stmt_bind_param($stmt, $bind_types, ...$bind_values);
 	mysqli_stmt_execute($stmt);
 	$result = mysqli_stmt_get_result($stmt);
 

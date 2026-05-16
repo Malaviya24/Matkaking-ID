@@ -66,7 +66,7 @@ if (isset($_POST['single_submit']) && isset($_SESSION['usr_id'])!="") {
                 foreach($jodi_array as $digit){
                     $bets[$digit] = $_POST['jodi'.$digit] ?? 0;
                 }
-                $placed = app_place_bets($user_id, $game_id, 'jodi', $bets, 0, $default_game);
+                $placed = app_place_bets($user_id, $game_id, 'jodi', $bets, 0, $default_game, $_scraped_bet_date);
     
                 if($placed['ok']){
                     //echo "<script>alert('Bidding Successfully Submited')</script>";

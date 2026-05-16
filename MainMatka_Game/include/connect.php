@@ -322,7 +322,7 @@ function app_user_withdrawable_amount($userId)
     return max(0.0, app_money_value($row['withdrawable'] ?? 0));
 }
 
-function app_place_bets($userId, $gameId, $gameType, array $bets, $starline = 0, $sessionType = '')
+function app_place_bets($userId, $gameId, $gameType, array $bets, $starline = 0, $sessionType = '', $betDate = '')
 {
     global $con;
 
@@ -330,7 +330,7 @@ function app_place_bets($userId, $gameId, $gameType, array $bets, $starline = 0,
     $gameId = (int) $gameId;
     $gameType = (string) $gameType;
     $starline = (int) $starline;
-    $date = date('Y-m-d');
+    $date = ($betDate !== '') ? $betDate : date('Y-m-d');
     $time = date('h:i:s A');
     $rows = [];
     $total = 0.0;
@@ -437,27 +437,11 @@ function app_safe_return_path($encodedReturnUrl)
 /**
  * Check if a scraped market is currently accepting bets.
  *
- * NEW BETTING-WINDOW RULE (live-result driven):
- *   The source site (dpboss-king.vercel.app) maintains a "LIVE RESULT"
- *   section in the hero area. While a market is listed there, the source
- *   is actively broadcasting its result-declaration window — we MUST
- *   stop accepting bets for that market in the matching session.
- *   When the market disappears from that section, betting resumes
- *   (subject to the normal session rules below).
- *
- * Decision logic (evaluated in order):
- * 1. result_status='closed' → reject: "Market is closed, no bets accepted"
- * 2. is_live=1 → reject: "Result is being declared, betting paused"
- *      ↳ While the market is in the source's LIVE RESULT block, the
- *        operator is publishing a result. No new bets.
- * 3. result_status='open_declared' AND session_type='open' → reject:
- *      "Open betting is closed for this market"
- * 4. result_status='open_declared' AND session_type='close' → allow
- * 5. result_status='waiting' → allow
- *
- * NOTE: The previous "10 minutes before close_time" cutoff has been
- * removed. The source site's LIVE RESULT presence is now the single
- * source of truth for the betting cutoff window.
+ * ALWAYS-OPEN MODEL:
+ * Betting is ONLY blocked when the market is in the source's LIVE RESULT
+ * block (is_live=1). All other states allow betting — if today's result
+ * is already declared, the bet is placed for tomorrow (handled by the
+ * calling code via $sm_bet_date).
  *
  * @param int $scraped_market_id  The scraped_markets.id
  * @param string $bet_side  'open' or 'close'
@@ -470,43 +454,30 @@ function app_scraped_market_bet_allowed($scraped_market_id, $bet_side = 'open')
     $id = (int) $scraped_market_id;
     $today = date('Y-m-d');
 
-    $stmt = mysqli_prepare($con, "SELECT * FROM scraped_markets WHERE id = ? AND date = ? LIMIT 1");
+    // Get the most recent row for this market (today or latest)
+    $stmt = mysqli_prepare($con, "SELECT * FROM scraped_markets WHERE id = ? LIMIT 1");
     if (!$stmt) {
         return ['allowed' => false, 'reason' => 'Betting is not available right now.'];
     }
 
-    mysqli_stmt_bind_param($stmt, 'is', $id, $today);
+    mysqli_stmt_bind_param($stmt, 'i', $id);
     mysqli_stmt_execute($stmt);
     $result = mysqli_stmt_get_result($stmt);
     $market = $result ? mysqli_fetch_assoc($result) : null;
 
     if (!$market) {
-        return ['allowed' => false, 'reason' => 'Market not found or not available today.'];
+        return ['allowed' => false, 'reason' => 'Market not found.'];
     }
 
-    $result_status = $market['result_status'] ?? 'waiting';
-    $session_type = (string) $bet_side;
     // is_live may not exist on older DB schemas — default to 0 (not live)
     $is_live = (int) ($market['is_live'] ?? 0);
 
-    // 1. Market fully closed — reject all bets immediately
-    if ($result_status === 'closed') {
-        return ['allowed' => false, 'reason' => 'Market is closed, no bets accepted'];
-    }
-
-    // 2. Source site has this market in the LIVE RESULT block —
-    //    a result is being declared right now. No bets.
+    // ONLY block when market is in LIVE RESULT section
     if ($is_live === 1) {
         return ['allowed' => false, 'reason' => 'Result is being declared, betting paused'];
     }
 
-    // 3. Open result declared and user wants to bet on open session — reject
-    if ($result_status === 'open_declared' && $session_type === 'open') {
-        return ['allowed' => false, 'reason' => 'Open betting is closed for this market'];
-    }
-
-    // 4. Open result declared, close session — allow
-    // 5. Waiting status — allow
+    // All other states: betting is allowed
     return ['allowed' => true, 'reason' => '', 'market' => $market];
 }
 

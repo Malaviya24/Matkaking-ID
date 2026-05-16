@@ -61,7 +61,7 @@ if (isset($_POST['single_submit']) && isset($_SESSION['usr_id'])!="") {
                     $digit_length = strlen($fs_digit);
     				if($amount >=5 && $digit_length == 7)
     				{
-                        $placed = app_place_bets($user_id, $game_id, 'full_sangam', [$fs_digit => $amount], 0, $default_game);
+                        $placed = app_place_bets($user_id, $game_id, 'full_sangam', [$fs_digit => $amount], 0, $default_game, $_scraped_bet_date);
                     } else {
                         $placed = ['ok' => false, 'reason' => 'empty'];
     				}

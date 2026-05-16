@@ -2,12 +2,13 @@
 /**
  * Scraped Market Game Setup
  * 
- * BETTING LOGIC:
- * - Betting opens at market open_time
- * - Before open result: bets go to "Open" session
- * - After open result declared: bets go to "Close" session  
- * - Betting closes 10 min before close_time
- * - User can also manually select Open/Close session
+ * NEW BETTING MODEL (always-open):
+ * - Betting is ALWAYS open unless market is in LIVE RESULT block (is_live=1)
+ * - If today's result is fully declared (closed), bets are placed for TOMORROW
+ * - If today's open result is declared, close-session bets are for today,
+ *   but jodi/half-sangam/full-sangam bets roll to tomorrow (they need both halves)
+ * - The bet's effective date ($sm_bet_date) is passed to the form and used
+ *   by app_place_bets() to store the correct resolution date
  */
 
 $is_scraped_market = false;
@@ -17,6 +18,8 @@ if ($_scraped_pgid) {
     $is_scraped_market = true;
     
     $today = date('Y-m-d');
+    $tomorrow = date('Y-m-d', strtotime('+1 day'));
+    
     $_sm_stmt = mysqli_prepare($con, "SELECT * FROM scraped_markets WHERE id = ? AND date = ? LIMIT 1");
     mysqli_stmt_bind_param($_sm_stmt, 'is', $_scraped_pgid, $today);
     mysqli_stmt_execute($_sm_stmt);
@@ -24,9 +27,18 @@ if ($_scraped_pgid) {
     $_sm_data = $_sm_result ? mysqli_fetch_assoc($_sm_result) : null;
     
     if (!$_sm_data) {
-        echo "<script>alert('Market not available today.')</script>";
-        echo "<script>window.location = 'index.php';</script>";
-        exit;
+        // Try to find by slug (market might not have today's row yet)
+        $_sm_stmt2 = mysqli_prepare($con, "SELECT * FROM scraped_markets WHERE id = ? ORDER BY date DESC LIMIT 1");
+        mysqli_stmt_bind_param($_sm_stmt2, 'i', $_scraped_pgid);
+        mysqli_stmt_execute($_sm_stmt2);
+        $_sm_result2 = mysqli_stmt_get_result($_sm_stmt2);
+        $_sm_data = $_sm_result2 ? mysqli_fetch_assoc($_sm_result2) : null;
+        
+        if (!$_sm_data) {
+            echo "<script>alert('Market not available.')</script>";
+            echo "<script>window.location = 'index.php';</script>";
+            exit;
+        }
     }
     
     // Set game variables
@@ -35,56 +47,64 @@ if ($_scraped_pgid) {
     $child_game_id = 'scraped_' . $_scraped_pgid;
     $child_open = 'scraped_' . $_scraped_pgid;
     $child_close = 'scraped_' . $_scraped_pgid;
+    $sm_market_slug = $_sm_data['market_slug'];
     
-    // Time calculations
-    $now = time();
-    $open_ts = strtotime(date('Y-m-d') . ' ' . $_sm_data['open_time']);
-    $close_ts = strtotime(date('Y-m-d') . ' ' . $_sm_data['close_time']);
-    if ($close_ts < $open_ts) {
-        $close_ts = strtotime(date('Y-m-d', strtotime('+1 day')) . ' ' . $_sm_data['close_time']);
-    }
+    // Check current state
+    $is_live = (int) ($_sm_data['is_live'] ?? 0);
+    $result_status = $_sm_data['result_status'] ?? 'waiting';
+    $open_result_declared = ($result_status === 'open_declared' || $result_status === 'closed');
+    $market_closed_today = ($result_status === 'closed');
     
-    // 10 min before close = cutoff, 2 min after close = result done
-    $close_cutoff = $close_ts - (10 * 60);
-    $result_done_time = $close_ts + (2 * 60);
-    
-    // Check if open result is already declared
-    $open_result_declared = ($_sm_data['result_status'] === 'open_declared' || $_sm_data['result_status'] === 'closed');
-    
-    // Determine betting status - only closed during the 12-min window
-    if ($now >= $close_cutoff && $now < $result_done_time) {
+    // ─── BETTING STATUS ─────────────────────────────────────────────
+    // Only closed when market is in LIVE RESULT block
+    if ($is_live === 1) {
         $bidding_status = 0;
-        $msg = 'Betting is Closed for Today';
+        $msg = 'Result is being declared';
         $default_bidding_game = '';
     } else {
-        // Betting is open
+        // Betting is ALWAYS open
         $bidding_status = 1;
         
-        if ($open_result_declared && $now < $close_cutoff) {
+        if ($market_closed_today) {
+            // Today's full result is done → bets are for tomorrow
+            $default_bidding_game = 'open';
+            $msg = 'Betting for Tomorrow';
+        } elseif ($open_result_declared) {
+            // Open declared, close not yet → close session for today
             $default_bidding_game = 'close';
-            $msg = 'Close Betting is Running';
+            $msg = 'Close Betting Running';
         } else {
             $default_bidding_game = 'open';
-            $msg = 'Open Betting is Running';
+            $msg = 'Open Betting Running';
         }
         
-        // Allow user to override session
-        if ($default_game === 'close') {
-            $default_bidding_game = 'close';
-            $msg = 'Close Betting is Running';
-        } elseif ($default_game === 'open') {
-            $default_bidding_game = 'open';
-            $msg = 'Open Betting is Running';
+        // Allow user to override session (only if not closed for today)
+        if (!$market_closed_today) {
+            if ($default_game === 'close') {
+                $default_bidding_game = 'close';
+            } elseif ($default_game === 'open') {
+                $default_bidding_game = 'open';
+            }
         }
     }
     
-    $default_bidding_date = 'today';
+    // ─── BET DATE CALCULATION ───────────────────────────────────────
+    // This is the date the bet resolves on (used by settlement engine)
+    if ($market_closed_today) {
+        // Today done → all bets are for tomorrow
+        $sm_bet_date = $tomorrow;
+    } else {
+        // Today still in progress → bets are for today
+        $sm_bet_date = $today;
+    }
+    
+    $default_bidding_date = ($sm_bet_date === $tomorrow) ? 'tomorrow' : 'today';
     $open_time = $_sm_data['open_time'];
     $close_time = $_sm_data['close_time'];
     $status = 1;
     
-    // For session selector in form - both always available until cutoff
-    $sm_open_available = ($now < $close_cutoff);
-    $sm_close_available = ($now < $close_cutoff);
+    // For session selector in form — both available unless market is live
+    $sm_open_available = ($bidding_status === 1);
+    $sm_close_available = ($bidding_status === 1 && !$market_closed_today);
 }
 ?>

@@ -74,7 +74,7 @@ if (isset($_POST['single_submit']) && isset($_SESSION['usr_id'])!="") {
     				{
                         $bets[$hs_digit2] = $amount2;
     				}
-                    $placed = app_place_bets($user_id, $game_id, 'half_sangam', $bets, 0, $default_game);
+                    $placed = app_place_bets($user_id, $game_id, 'half_sangam', $bets, 0, $default_game, $_scraped_bet_date);
     			
     
                 if($placed['ok']){
