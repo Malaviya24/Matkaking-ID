@@ -638,6 +638,8 @@ def update_database(markets):
                     "WHERE market_slug = %s AND date = %s",
                     (new_is_live, slug, today)
                 )
+                # Commit immediately so PHP sees the live flag change ASAP
+                conn.commit()
                 updated += 1
                 if new_is_live:
                     log.info(f"LIVE FLAG ON: '{m['market_name']}' [{slug}] entered LIVE RESULT block — betting closed.")

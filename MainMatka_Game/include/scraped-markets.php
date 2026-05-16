@@ -99,7 +99,7 @@ function render_scraped_markets() {
             }
         }
 ?>
-        <div class="game-card-new">
+        <div class="game-card-new" data-market-slug="<?php echo $market_slug; ?>" data-market-gid="<?php echo $row['id']; ?>">
             <button type="button" class="game-card__clock" onclick="showTimeModal('<?php echo $market_name; ?>','<?php echo $open_time; ?>','<?php echo $close_time; ?>')" aria-label="Timings">
                 <img src="assets/img/clock.png" width="30" height="30" alt="" loading="lazy">
             </button>
@@ -156,6 +156,63 @@ function render_scraped_markets() {
         document.getElementById('stm_close').textContent = close;
         $('#sharedTimeModal').modal('show');
     }
+
+    // Live polling: update market betting status every 5 seconds
+    (function(){
+        function updateMarketStatus() {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', 'api_market_status.php?t=' + Date.now(), true);
+            xhr.timeout = 8000;
+            xhr.onload = function() {
+                if (xhr.status !== 200) return;
+                try {
+                    var data = JSON.parse(xhr.responseText);
+                    if (!data.markets) return;
+                    data.markets.forEach(function(m) {
+                        var card = document.querySelector('[data-market-slug="' + m.slug + '"]');
+                        if (!card) return;
+
+                        // Update result display
+                        var resultEl = card.querySelector('.game-result');
+                        if (resultEl && resultEl.textContent !== m.result) {
+                            resultEl.textContent = m.result;
+                        }
+
+                        // Update status badge
+                        var badge = card.querySelector('.status-badge');
+                        if (badge) {
+                            badge.textContent = m.msg;
+                            badge.className = 'status-badge ' + (m.bidding ? 'running' : 'closed');
+                        }
+
+                        // Update play button (enable/disable)
+                        var playEl = card.querySelector('.game-card__play');
+                        if (playEl) {
+                            var gid = card.getAttribute('data-market-gid');
+                            if (m.bidding && playEl.tagName === 'SPAN') {
+                                // Was disabled, now should be enabled — convert to link
+                                var link = document.createElement('a');
+                                link.href = 'game-dashboard.php?game=' + m.slug + '&gid=' + gid + '&src=live';
+                                link.className = 'game-card__play';
+                                link.innerHTML = '<img src="assets/img/play.png" width="22" height="22" alt="" loading="lazy"><span>Play</span>';
+                                playEl.parentNode.replaceChild(link, playEl);
+                            } else if (!m.bidding && playEl.tagName === 'A') {
+                                // Was enabled, now should be disabled — convert to span
+                                var span = document.createElement('span');
+                                span.className = 'game-card__play game-card__play--disabled';
+                                span.innerHTML = '<img src="assets/img/play.png" width="22" height="22" alt="" loading="lazy"><span>Play</span>';
+                                playEl.parentNode.replaceChild(span, playEl);
+                            }
+                        }
+                    });
+                } catch(e) {}
+            };
+            xhr.send();
+        }
+
+        // Poll every 5 seconds
+        setInterval(updateMarketStatus, 5000);
+    })();
     </script>
 <?php
 }
