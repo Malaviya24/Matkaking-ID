@@ -19,19 +19,35 @@ function get_scraped_markets() {
 }
 
 function format_scraped_result($row) {
+    $status = $row['result_status'] ?? 'waiting';
+
+    // Strictly enforce waiting format — no other format allowed while waiting
+    if ($status === 'waiting') {
+        return '***-**-***';
+    }
+
     $open_panna = $row['open_panna'] ?? '';
     $open_ank = $row['open_ank'] ?? '';
     $close_panna = $row['close_panna'] ?? '';
-    $close_ank = $row['close_ank'] ?? '';
-    $status = $row['result_status'] ?? 'waiting';
+    $jodi = $row['jodi'] ?? '';
 
-    if ($status === 'closed' && $open_panna && $close_panna) {
-        return $open_panna . '-' . $open_ank . $close_ank . '-' . $close_panna;
-    } elseif ($status === 'open_declared' && $open_panna) {
-        return $open_panna . '-' . $open_ank . '*-***';
-    } else {
-        return '***-**-***';
+    // Force immediate update on status transition to open_declared
+    if ($status === 'open_declared') {
+        $panna = $open_panna !== '' ? $open_panna : '***';
+        $ank = $open_ank !== '' ? $open_ank : '*';
+        return $panna . '-' . $ank . '*-***';
     }
+
+    // Force immediate update on status transition to closed
+    if ($status === 'closed') {
+        $panna = $open_panna !== '' ? $open_panna : '***';
+        $j = $jodi !== '' ? $jodi : '**';
+        $cpanna = $close_panna !== '' ? $close_panna : '***';
+        return $panna . '-' . $j . '-' . $cpanna;
+    }
+
+    // Fallback for any unknown status
+    return '***-**-***';
 }
 
 function render_scraped_markets() {

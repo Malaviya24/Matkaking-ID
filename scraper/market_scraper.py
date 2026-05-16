@@ -1,6 +1,6 @@
 """
 MainMatka Market Scraper
-Scrapes market data from dpboss-king.vercel.app every 5 seconds.
+Scrapes market data from dpboss-king.vercel.app every 3 seconds.
 Stores market names, open/close times, and results into MySQL.
 Handles "loading..." states by preserving last known result.
 """
@@ -12,7 +12,9 @@ import logging
 import signal
 import sys
 from datetime import datetime
+from typing import Optional
 
+import requests as http_requests
 import mysql.connector
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -24,7 +26,16 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 SCRAPE_URL = "https://dpboss-king.vercel.app/"
-SCRAPE_INTERVAL = 5  # seconds
+SCRAPE_INTERVAL = 3  # seconds between end of one cycle and start of next
+MIN_CYCLE_DELAY = 1  # minimum delay (seconds) when a cycle exceeds SCRAPE_INTERVAL
+
+# Settlement endpoint configuration
+SETTLEMENT_URL = os.environ.get(
+    "SETTLEMENT_URL",
+    "http://localhost/cpanel_hgCBWj0S/settle-market.php"
+)
+SETTLEMENT_SECRET_KEY = os.environ.get("SETTLEMENT_SECRET_KEY", "")
+SETTLEMENT_TIMEOUT = 10  # seconds
 
 DB_CONFIG = {
     "host": os.environ.get("MAINMATKA_DB_HOST", "127.0.0.1"),
@@ -84,6 +95,7 @@ def ensure_table_exists():
             `id` INT AUTO_INCREMENT PRIMARY KEY,
             `market_name` VARCHAR(100) NOT NULL,
             `market_slug` VARCHAR(100) NOT NULL,
+            `display_order` INT NOT NULL DEFAULT 0,
             `open_time` VARCHAR(20) DEFAULT NULL,
             `close_time` VARCHAR(20) DEFAULT NULL,
             `open_panna` VARCHAR(10) DEFAULT NULL,
@@ -318,7 +330,17 @@ def scrape_markets():
 
 # ─── Database Update ─────────────────────────────────────────────────────────
 def update_database(markets):
-    """Update scraped_markets table. Preserve last result if current is 'loading'."""
+    """
+    Update scraped_markets table with transition detection and settlement triggering.
+
+    For each market:
+    1. Detect status transition BEFORE the DB update (so old status is still available)
+    2. Update the database with new market data
+    3. If a valid transition was detected, trigger settlement AFTER the DB update
+       (so the settlement engine reads fresh result data)
+
+    Preserve last result if current is 'loading'.
+    """
     if not markets:
         return 0
 
@@ -327,8 +349,12 @@ def update_database(markets):
     cursor = conn.cursor(dictionary=True)
     updated = 0
 
+    # Collect transitions to trigger settlement AFTER each market's DB update
+    settlements_to_trigger = []
+
     for m in markets:
         slug = m["market_slug"]
+        new_status = m["status"]
 
         # Check existing record for today
         cursor.execute(
@@ -338,13 +364,19 @@ def update_database(markets):
         existing = cursor.fetchone()
 
         # If status is 'waiting' and we already have a result, don't overwrite
-        if m["status"] == "waiting" and existing and existing["result_status"] in ("open_declared", "closed"):
+        if new_status == "waiting" and existing and existing["result_status"] in ("open_declared", "closed"):
             continue
 
         # If status is 'open_declared' and existing is 'closed', don't downgrade
-        if m["status"] == "open_declared" and existing and existing["result_status"] == "closed":
+        if new_status == "open_declared" and existing and existing["result_status"] == "closed":
             continue
 
+        # ─── Step 1: Detect status transition BEFORE the DB update ────────
+        # detect_status_transition() queries the DB for the OLD status,
+        # so it must be called before we write the new data.
+        old_status = detect_status_transition(slug, new_status, today)
+
+        # ─── Step 2: Update the database with new market data ─────────────
         if existing:
             # Update existing record
             cursor.execute("""
@@ -366,7 +398,7 @@ def update_database(markets):
                 m["market_name"], m["display_order"], m["open_time"], m["close_time"],
                 m["open_panna"], m["open_ank"], m["close_panna"],
                 m["close_ank"], m["jodi"], m["full_result"],
-                m["status"], slug, today
+                new_status, slug, today
             ))
         else:
             # Insert new record
@@ -380,15 +412,164 @@ def update_database(markets):
                 m["market_name"], slug, m["display_order"], m["open_time"], m["close_time"],
                 m["open_panna"], m["open_ank"], m["close_panna"],
                 m["close_ank"], m["jodi"], m["full_result"],
-                m["status"], today
+                new_status, today
             ))
 
         updated += 1
 
+        # ─── Step 3: Queue settlement trigger if transition detected ──────
+        # Settlement is triggered AFTER the DB commit so the settlement
+        # engine reads fresh result data from scraped_markets.
+        if old_status is not None:
+            # Get the market_id (scraped_markets.id) needed for settlement
+            market_id = existing["id"] if existing else None
+            if market_id is None:
+                # For newly inserted records, fetch the ID
+                cursor.execute(
+                    "SELECT id FROM scraped_markets WHERE market_slug = %s AND date = %s LIMIT 1",
+                    (slug, today)
+                )
+                row = cursor.fetchone()
+                market_id = row["id"] if row else None
+
+            if market_id:
+                settlements_to_trigger.append({
+                    "market_id": market_id,
+                    "market_name": m["market_name"],
+                    "old_status": old_status,
+                    "new_status": new_status,
+                })
+
+    # Commit all DB updates first
     conn.commit()
     cursor.close()
     conn.close()
+
+    # ─── Step 4: Trigger settlements AFTER DB commit ──────────────────────
+    # This ensures the settlement engine reads fresh data from scraped_markets.
+    for s in settlements_to_trigger:
+        if s["old_status"] == "waiting" and s["new_status"] == "open_declared":
+            trigger_settlement(s["market_id"], "open", s["market_name"])
+        elif s["old_status"] == "open_declared" and s["new_status"] == "closed":
+            trigger_settlement(s["market_id"], "close", s["market_name"])
+
     return updated
+
+
+# ─── Status Transition Detection ─────────────────────────────────────────────
+def detect_status_transition(market_slug: str, new_status: str, today: str) -> Optional[str]:
+    """
+    Compare new_status against stored result_status for market_slug on today.
+    Returns the old_status if a transition occurred, None otherwise.
+
+    When no change is detected, the transition flag is explicitly set to false
+    (returning None signals no transition). Only logs when an actual status
+    change is detected (previous status differs from current).
+    """
+    transition_detected = False
+    old_status = None
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Query the current stored result_status before updating
+        cursor.execute(
+            "SELECT result_status, market_name FROM scraped_markets WHERE market_slug = %s AND date = %s LIMIT 1",
+            (market_slug, today)
+        )
+        existing = cursor.fetchone()
+
+        cursor.close()
+        conn.close()
+
+        if existing is None:
+            # No existing record — this is a new insert, not a transition
+            transition_detected = False
+            return None
+
+        stored_status = existing["result_status"]
+        market_name = existing["market_name"]
+
+        if stored_status != new_status:
+            # Actual status change detected
+            transition_detected = True
+            old_status = stored_status
+
+            # Log the transition with market name, previous status, new status, and timestamp
+            log.info(
+                f"STATUS TRANSITION: '{market_name}' [{market_slug}] "
+                f"changed from '{old_status}' to '{new_status}' "
+                f"at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+        else:
+            # No change detected — explicitly set transition flag to false
+            transition_detected = False
+
+    except mysql.connector.Error as e:
+        log.error(f"Database error in detect_status_transition for '{market_slug}': {e}")
+        transition_detected = False
+
+    if transition_detected:
+        return old_status
+    return None
+
+
+# ─── Settlement Trigger ──────────────────────────────────────────────────────
+def trigger_settlement(market_id: int, settlement_type: str, market_name: str) -> bool:
+    """
+    Call PHP settlement endpoint.
+    settlement_type: 'open' or 'close'
+    Returns True if settlement was triggered successfully.
+    """
+    if not SETTLEMENT_URL:
+        log.error(f"SETTLEMENT_URL not configured. Cannot trigger {settlement_type} settlement for '{market_name}'.")
+        return False
+
+    payload = {
+        "market_id": market_id,
+        "settlement_type": settlement_type,
+        "secret_key": SETTLEMENT_SECRET_KEY,
+    }
+
+    try:
+        response = http_requests.post(
+            SETTLEMENT_URL,
+            data=payload,
+            timeout=SETTLEMENT_TIMEOUT,
+        )
+
+        if response.status_code == 200:
+            log.info(
+                f"SETTLEMENT TRIGGERED: '{market_name}' (id={market_id}) "
+                f"type='{settlement_type}' — response: {response.text[:200]}"
+            )
+            return True
+        else:
+            log.error(
+                f"SETTLEMENT FAILED: '{market_name}' (id={market_id}) "
+                f"type='{settlement_type}' — HTTP {response.status_code}: {response.text[:200]}"
+            )
+            return False
+
+    except http_requests.exceptions.Timeout:
+        log.error(
+            f"SETTLEMENT TIMEOUT: '{market_name}' (id={market_id}) "
+            f"type='{settlement_type}' — request timed out after {SETTLEMENT_TIMEOUT}s"
+        )
+        return False
+    except http_requests.exceptions.ConnectionError:
+        log.error(
+            f"SETTLEMENT CONNECTION ERROR: '{market_name}' (id={market_id}) "
+            f"type='{settlement_type}' — could not connect to {SETTLEMENT_URL}"
+        )
+        return False
+    except http_requests.exceptions.RequestException as e:
+        log.error(
+            f"SETTLEMENT ERROR: '{market_name}' (id={market_id}) "
+            f"type='{settlement_type}' — {e}"
+        )
+        return False
 
 
 # ─── Main Loop ───────────────────────────────────────────────────────────────
@@ -417,8 +598,13 @@ def main():
             log.error(f"Cycle #{cycle}: Error - {e}")
 
         # Wait for next cycle
+        # Requirement 1.1: Wait full SCRAPE_INTERVAL (3s) between end of cycle and start of next
+        # Requirement 1.2: If cycle took longer than SCRAPE_INTERVAL, wait minimum MIN_CYCLE_DELAY (1s)
         elapsed = time.time() - start
-        sleep_time = max(0, SCRAPE_INTERVAL - elapsed)
+        if elapsed > SCRAPE_INTERVAL:
+            sleep_time = MIN_CYCLE_DELAY
+        else:
+            sleep_time = SCRAPE_INTERVAL
         time.sleep(sleep_time)
 
     log.info("Scraper stopped.")

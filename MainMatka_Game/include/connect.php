@@ -404,8 +404,14 @@ function app_safe_return_path($encodedReturnUrl)
 
 /**
  * Check if a scraped market is currently accepting bets.
- * Betting is open until 10 min before close time.
- * After open result: only close bets accepted.
+ * Enforces betting flow control based on result_status, session_type, and time.
+ *
+ * Decision logic (evaluated in order):
+ * 1. result_status='closed' → reject: "Market is closed, no bets accepted"
+ * 2. Current time >= (close_time - 10 min) → reject: "Betting cutoff reached"
+ * 3. result_status='open_declared' AND session_type='open' → reject: "Open betting is closed for this market"
+ * 4. result_status='open_declared' AND session_type='close' AND before cutoff → allow
+ * 5. result_status='waiting' AND before cutoff → allow
  *
  * @param int $scraped_market_id  The scraped_markets.id
  * @param string $bet_side  'open' or 'close'
@@ -432,24 +438,39 @@ function app_scraped_market_bet_allowed($scraped_market_id, $bet_side = 'open')
         return ['allowed' => false, 'reason' => 'Market not found or not available today.'];
     }
 
+    $result_status = $market['result_status'] ?? 'waiting';
+    $session_type = (string) $bet_side;
+
+    // 1. Market fully closed — reject all bets immediately
+    if ($result_status === 'closed') {
+        return ['allowed' => false, 'reason' => 'Market is closed, no bets accepted'];
+    }
+
+    // Calculate close_time timestamp and cutoff
     $now = time();
     $open_ts = strtotime(date('Y-m-d') . ' ' . $market['open_time']);
     $close_ts = strtotime(date('Y-m-d') . ' ' . $market['close_time']);
 
-    // Handle overnight markets
+    // Handle overnight markets (close_time < open_time means next day)
     if ($close_ts < $open_ts) {
         $close_ts = strtotime(date('Y-m-d', strtotime('+1 day')) . ' ' . $market['close_time']);
     }
 
-    // Betting closes 10 min before close time, reopens 2 min after close
+    // Betting cutoff: 10 minutes before close_time
     $close_cutoff = $close_ts - (10 * 60);
-    $result_done_time = $close_ts + (2 * 60);
 
-    // Only blocked during the 12-min window
-    if ($now >= $close_cutoff && $now < $result_done_time) {
-        return ['allowed' => false, 'reason' => 'Betting is closed. Result is being declared.'];
+    // 2. Within 10 minutes of close_time — reject all bets
+    if ($now >= $close_cutoff) {
+        return ['allowed' => false, 'reason' => 'Betting cutoff reached'];
     }
 
+    // 3. Open result declared and user wants to bet on open session — reject
+    if ($result_status === 'open_declared' && $session_type === 'open') {
+        return ['allowed' => false, 'reason' => 'Open betting is closed for this market'];
+    }
+
+    // 4. Open result declared, close session, before cutoff — allow
+    // 5. Waiting status, before cutoff — allow
     return ['allowed' => true, 'reason' => '', 'market' => $market];
 }
 

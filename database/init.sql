@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS `user_transaction` (
     `user_id` INT NOT NULL,
     `game_id` VARCHAR(20) NOT NULL DEFAULT '',
     `game_type` VARCHAR(30) NOT NULL DEFAULT '',
+    `session_type` VARCHAR(10) NOT NULL DEFAULT '',
     `digit` VARCHAR(30) NOT NULL DEFAULT '',
     `date` DATE NOT NULL,
     `time` VARCHAR(20) DEFAULT NULL,
@@ -207,6 +208,24 @@ CREATE TABLE IF NOT EXISTS `notifications` (
     `date` DATE DEFAULT NULL,
     `time` VARCHAR(20) DEFAULT NULL,
     `status` TINYINT NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Settlement log (audit trail for auto-settlement operations)
+CREATE TABLE IF NOT EXISTS `settlement_log` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `market_id` INT NOT NULL,
+    `market_name` VARCHAR(100) NOT NULL,
+    `settlement_type` VARCHAR(10) NOT NULL,
+    `date` DATE NOT NULL,
+    `bets_processed` INT NOT NULL DEFAULT 0,
+    `winners_found` INT NOT NULL DEFAULT 0,
+    `total_credited` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    `status` VARCHAR(20) NOT NULL DEFAULT 'success',
+    `error_message` TEXT DEFAULT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_market_id` (`market_id`),
+    INDEX `idx_date` (`date`),
+    INDEX `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- =============================================
