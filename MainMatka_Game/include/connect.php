@@ -54,6 +54,35 @@ $db_port = (int) env_or_default('MAINMATKA_DB_PORT', '3306');
 
 $con = mysqli_connect($db_host, $db_user, $db_pass, $db_name, $db_port) or die("Error " . mysqli_error($con));
 
+/**
+ * Ensure required schema migrations exist. Idempotent and cheap —
+ * runs once per process via a static flag. Keeps the PHP side from
+ * crashing on a fresh deploy where the scraper hasn't yet bootstrapped
+ * new columns it added later in the project's life.
+ */
+function app_ensure_schema_migrations()
+{
+    global $con;
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+
+    // Add is_live column to scraped_markets if missing.
+    // Errno 1060 = duplicate column (already there) — expected, ignore.
+    $sql = "ALTER TABLE scraped_markets ADD COLUMN is_live TINYINT(1) NOT NULL DEFAULT 0";
+    if (!@mysqli_query($con, $sql)) {
+        $errno = mysqli_errno($con);
+        if ($errno !== 0 && $errno !== 1060 && $errno !== 1146) {
+            // 1146 = table doesn't exist yet (scraper hasn't run); also fine to skip
+            error_log("schema migration warning ({$errno}): " . mysqli_error($con));
+        }
+    }
+}
+
+app_ensure_schema_migrations();
+
 // Public website base. Keep the default relative so local/admin navigation never jumps to a live domain.
 define('SITEURL', env_or_default('MAINMATKA_SITE_URL', './'));
 $home_url = SITEURL;
@@ -454,6 +483,7 @@ function app_scraped_market_bet_allowed($scraped_market_id, $bet_side = 'open')
 
     $result_status = $market['result_status'] ?? 'waiting';
     $session_type = (string) $bet_side;
+    // is_live may not exist on older DB schemas — default to 0 (not live)
     $is_live = (int) ($market['is_live'] ?? 0);
 
     // 1. Market fully closed — reject all bets immediately

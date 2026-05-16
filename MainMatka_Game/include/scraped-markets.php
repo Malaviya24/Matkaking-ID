@@ -7,11 +7,22 @@
 function get_scraped_markets() {
     global $con;
     $today = date('Y-m-d');
-    $sql = "SELECT id, market_name, market_slug, open_time, close_time, open_panna, open_ank, close_panna, close_ank, jodi, result_status, is_live, display_order FROM scraped_markets WHERE date = '$today' AND open_time != '' AND close_time != '' AND display_order > 0 ORDER BY display_order ASC";
-    $result = mysqli_query($con, $sql);
+    $sql_with_live = "SELECT id, market_name, market_slug, open_time, close_time, open_panna, open_ank, close_panna, close_ank, jodi, result_status, is_live, display_order FROM scraped_markets WHERE date = '$today' AND open_time != '' AND close_time != '' AND display_order > 0 ORDER BY display_order ASC";
+    $sql_legacy = "SELECT id, market_name, market_slug, open_time, close_time, open_panna, open_ank, close_panna, close_ank, jodi, result_status, display_order FROM scraped_markets WHERE date = '$today' AND open_time != '' AND close_time != '' AND display_order > 0 ORDER BY display_order ASC";
+
+    // Suppress warnings; we explicitly handle the "missing column" case
+    // when the scraper hasn't finished its schema bootstrap yet.
+    $result = @mysqli_query($con, $sql_with_live);
+    if (!$result) {
+        $result = mysqli_query($con, $sql_legacy);
+    }
     $markets = [];
     if ($result) {
         while ($row = mysqli_fetch_assoc($result)) {
+            // Default is_live to 0 when column is absent
+            if (!array_key_exists('is_live', $row)) {
+                $row['is_live'] = 0;
+            }
             $markets[] = $row;
         }
     }
