@@ -39,11 +39,17 @@ SCRAPE_INTERVAL = 3  # seconds between end of one cycle and start of next
 MIN_CYCLE_DELAY = 1  # minimum delay (seconds) when a cycle exceeds SCRAPE_INTERVAL
 
 # Settlement endpoint configuration
-SETTLEMENT_URL = os.environ.get(
-    "SETTLEMENT_URL",
-    "http://localhost/cpanel_hgCBWj0S/settle-market.php"
+# Primary names match PHP-side (MAINMATKA_SETTLEMENT_*); legacy names kept as fallback.
+SETTLEMENT_URL = (
+    os.environ.get("MAINMATKA_SETTLEMENT_URL")
+    or os.environ.get("SETTLEMENT_URL")
+    or "http://localhost/cpanel_hgCBWj0S/settle-market.php"
 )
-SETTLEMENT_SECRET_KEY = os.environ.get("SETTLEMENT_SECRET_KEY", "")
+SETTLEMENT_SECRET_KEY = (
+    os.environ.get("MAINMATKA_SETTLEMENT_SECRET")
+    or os.environ.get("SETTLEMENT_SECRET_KEY")
+    or ""
+)
 SETTLEMENT_TIMEOUT = 10  # seconds
 
 DB_CONFIG = {
