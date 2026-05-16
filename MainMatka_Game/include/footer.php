@@ -71,7 +71,16 @@ function selectAmt(el, amt) {
 
 function clickPanna(el) {
     if (!selectedBidAmount || selectedBidAmount <= 0) {
-        alert('Please Select Amount First');
+        // Highlight the amount section instead of showing an alert
+        var amtBoxes = document.querySelectorAll('.bidamtbox');
+        amtBoxes.forEach(function(box) {
+            box.style.transition = 'box-shadow 0.3s';
+            box.style.boxShadow = '0 0 12px rgba(252,129,129,0.7)';
+            setTimeout(function(){ box.style.boxShadow = ''; }, 1200);
+        });
+        // Scroll to amount section
+        var heading = document.querySelector('.subheading');
+        if (heading) heading.scrollIntoView({behavior:'smooth', block:'center'});
         return;
     }
     var existing = parseInt(el.value) || 0;
@@ -359,7 +368,12 @@ function clickPanna(el) {
             inp.addEventListener('click', function(e){
                 var selectedAmt = selectedAmountInput.value;
                 if (!selectedAmt || selectedAmt === '0'){
-                    alert('Please select amount first');
+                    // Highlight amount buttons instead of alert
+                    amountBtns.forEach(function(box) {
+                        box.style.transition = 'box-shadow 0.3s';
+                        box.style.boxShadow = '0 0 12px rgba(252,129,129,0.7)';
+                        setTimeout(function(){ box.style.boxShadow = ''; }, 1200);
+                    });
                     return;
                 }
                 // If empty, fill in. If has value, add to it.

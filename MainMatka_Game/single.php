@@ -36,6 +36,7 @@ if (isset($_POST['single_submit']) && isset($_SESSION['usr_id'])!="") {
             // Check if this is a scraped market bet
             $scraped_id = app_is_scraped_market_gid($_POST['pgid'] ?? '');
             $_scraped_bet_validated = false;
+            $_scraped_bet_date = date('Y-m-d');
             if ($scraped_id) {
                 $bet_side = ($default_game === 'close') ? 'close' : 'open';
                 $check = app_scraped_market_bet_allowed($scraped_id, $bet_side);
@@ -46,6 +47,12 @@ if (isset($_POST['single_submit']) && isset($_SESSION['usr_id'])!="") {
                 }
                 $game_id = (int) $scraped_id;
                 $_scraped_bet_validated = true;
+                
+                // Determine bet resolution date
+                $market_row = $check['market'] ?? null;
+                if ($market_row && ($market_row['result_status'] ?? '') === 'closed') {
+                    $_scraped_bet_date = date('Y-m-d', strtotime('+1 day'));
+                }
             }
     		
             if ($_scraped_bet_validated) {
