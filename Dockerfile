@@ -1,5 +1,12 @@
 FROM php:8.2-apache
 
+# Set Asia/Kolkata timezone so PHP date('Y-m-d') and Python both agree
+ENV TZ=Asia/Kolkata
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
+    && ln -sf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo "$TZ" > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN docker-php-ext-install mysqli \
     && a2enmod rewrite headers
 
@@ -15,7 +22,7 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearm
     && apt-get update && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --break-system-packages requests beautifulsoup4 mysql-connector-python selenium webdriver-manager
+RUN pip3 install --break-system-packages requests beautifulsoup4 mysql-connector-python "selenium>=4.10"
 
 WORKDIR /var/www/html
 COPY MainMatka_Game/ /var/www/html/

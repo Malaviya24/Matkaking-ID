@@ -11,7 +11,7 @@ import time
 import logging
 import signal
 import sys
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import requests as http_requests
@@ -22,7 +22,16 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
+
+# Asia/Kolkata = UTC+5:30 (no DST), used to align "today" with PHP server timezone.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def today_ist() -> str:
+    """Return today's date string in Asia/Kolkata timezone (matches PHP backend)."""
+    return datetime.now(IST).strftime("%Y-%m-%d")
+
+def now_ist_str() -> str:
+    return datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 SCRAPE_URL = "https://dpboss-king.vercel.app/"
@@ -220,18 +229,16 @@ def get_driver():
         options.add_argument("--disable-images")
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
-        # Use Chrome for Testing (auto-matched version)
-        from selenium.webdriver.chrome.service import Service as ChromeService
-        from webdriver_manager.chrome import ChromeDriverManager
-        from webdriver_manager.core.os_manager import ChromeType
-
+        # Selenium 4.6+ uses Selenium Manager which auto-resolves the
+        # correct chromedriver for the installed Chrome browser.
+        # We deliberately do NOT use webdriver-manager here because its
+        # legacy endpoint caps at chromedriver 114 and breaks for Chrome 115+.
         try:
-            service = ChromeService(ChromeDriverManager(chrome_type=ChromeType.GOOGLE).install())
-        except Exception:
-            # Fallback: try to find chromedriver in PATH
-            service = ChromeService()
+            _driver = webdriver.Chrome(options=options)
+        except Exception as e:
+            log.error(f"Selenium Manager failed to start Chrome: {e}")
+            raise
 
-        _driver = webdriver.Chrome(service=service, options=options)
         _driver.set_page_load_timeout(30)
         log.info("Chrome headless browser initialized.")
     return _driver
@@ -344,7 +351,7 @@ def update_database(markets):
     if not markets:
         return 0
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = today_ist()
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     updated = 0
@@ -363,12 +370,65 @@ def update_database(markets):
         )
         existing = cursor.fetchone()
 
-        # If status is 'waiting' and we already have a result, don't overwrite
-        if new_status == "waiting" and existing and existing["result_status"] in ("open_declared", "closed"):
+        # Detect "fresh-day overwrite": when source shows different open_panna
+        # than what's stored, treat it as new day's data and ALWAYS overwrite —
+        # even if that would normally look like a "downgrade" of status.
+        # This fixes the stale-result bug where yesterday's closed result
+        # (e.g. "170-83-256") sticks around when source shows today's
+        # partial result (e.g. "245-1*-***").
+        is_fresh_day_overwrite = False
+        if existing:
+            existing_open_panna = (existing.get("open_panna") or "").strip()
+            new_open_panna = (m.get("open_panna") or "").strip()
+            existing_full = (existing.get("full_result") or "").strip()
+            new_full = (m.get("full_result") or "").strip()
+
+            # Case A: stored closed (full result) but source now shows ONLY
+            # an open result whose open_panna doesn't match stored open_panna.
+            # That means the source has rolled into a new day's cycle.
+            if (
+                existing.get("result_status") == "closed"
+                and new_status == "open_declared"
+                and new_open_panna != ""
+                and new_open_panna != existing_open_panna
+            ):
+                is_fresh_day_overwrite = True
+
+            # Case B: stored closed/open_declared but source now shows ***-**-***
+            # (waiting) AND the previously stored full_result doesn't match the
+            # source's current display — the source has reset for a new day.
+            elif (
+                existing.get("result_status") in ("closed", "open_declared")
+                and new_status == "waiting"
+                and new_full == ""
+            ):
+                # Don't overwrite to waiting unconditionally — only when the
+                # last_updated timestamp is from a prior calendar day.
+                # `today` already filters by date column, so any record we
+                # find here is for `today`. The reset case is handled by
+                # the unique key on (market_slug, date) — yesterday's row
+                # will simply not be returned, and we'll INSERT a new one.
+                # So no override needed here.
+                pass
+
+        # If status is 'waiting' and we already have a result, don't overwrite —
+        # UNLESS we detected a fresh-day overwrite above.
+        if (
+            new_status == "waiting"
+            and existing
+            and existing["result_status"] in ("open_declared", "closed")
+            and not is_fresh_day_overwrite
+        ):
             continue
 
-        # If status is 'open_declared' and existing is 'closed', don't downgrade
-        if new_status == "open_declared" and existing and existing["result_status"] == "closed":
+        # If status is 'open_declared' and existing is 'closed', don't downgrade —
+        # UNLESS we detected a fresh-day overwrite (different open_panna).
+        if (
+            new_status == "open_declared"
+            and existing
+            and existing["result_status"] == "closed"
+            and not is_fresh_day_overwrite
+        ):
             continue
 
         # ─── Step 1: Detect status transition BEFORE the DB update ────────
@@ -500,7 +560,7 @@ def detect_status_transition(market_slug: str, new_status: str, today: str) -> O
             log.info(
                 f"STATUS TRANSITION: '{market_name}' [{market_slug}] "
                 f"changed from '{old_status}' to '{new_status}' "
-                f"at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                f"at {now_ist_str()}"
             )
         else:
             # No change detected — explicitly set transition flag to false
