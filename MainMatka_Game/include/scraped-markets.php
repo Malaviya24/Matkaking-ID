@@ -10,11 +10,20 @@ function get_scraped_markets() {
     $sql_with_live = "SELECT id, market_name, market_slug, open_time, close_time, open_panna, open_ank, close_panna, close_ank, jodi, result_status, is_live, display_order FROM scraped_markets WHERE date = '$today' AND open_time != '' AND close_time != '' AND display_order > 0 ORDER BY display_order ASC";
     $sql_legacy = "SELECT id, market_name, market_slug, open_time, close_time, open_panna, open_ank, close_panna, close_ank, jodi, result_status, display_order FROM scraped_markets WHERE date = '$today' AND open_time != '' AND close_time != '' AND display_order > 0 ORDER BY display_order ASC";
 
-    // Suppress warnings; we explicitly handle the "missing column" case
-    // when the scraper hasn't finished its schema bootstrap yet.
-    $result = @mysqli_query($con, $sql_with_live);
-    if (!$result) {
-        $result = mysqli_query($con, $sql_legacy);
+    // PHP 8.1+ mysqli throws mysqli_sql_exception on errors. The first
+    // SELECT may fail with errno 1054 (Unknown column 'is_live') on a
+    // fresh deploy where the column hasn't been added yet — fall back
+    // to the legacy SELECT and default is_live to 0 in PHP.
+    $result = null;
+    try {
+        $result = mysqli_query($con, $sql_with_live);
+    } catch (mysqli_sql_exception $e) {
+        try {
+            $result = mysqli_query($con, $sql_legacy);
+        } catch (mysqli_sql_exception $e2) {
+            error_log("get_scraped_markets fallback failed: " . $e2->getMessage());
+            return [];
+        }
     }
     $markets = [];
     if ($result) {

@@ -70,13 +70,16 @@ function app_ensure_schema_migrations()
     $done = true;
 
     // Add is_live column to scraped_markets if missing.
+    // PHP 8.1+ mysqli throws mysqli_sql_exception by default; @ does not
+    // catch exceptions, only warnings, so we use a real try/catch here.
     // Errno 1060 = duplicate column (already there) — expected, ignore.
-    $sql = "ALTER TABLE scraped_markets ADD COLUMN is_live TINYINT(1) NOT NULL DEFAULT 0";
-    if (!@mysqli_query($con, $sql)) {
-        $errno = mysqli_errno($con);
-        if ($errno !== 0 && $errno !== 1060 && $errno !== 1146) {
-            // 1146 = table doesn't exist yet (scraper hasn't run); also fine to skip
-            error_log("schema migration warning ({$errno}): " . mysqli_error($con));
+    // Errno 1146 = table doesn't exist (scraper hasn't run) — also fine.
+    try {
+        mysqli_query($con, "ALTER TABLE scraped_markets ADD COLUMN is_live TINYINT(1) NOT NULL DEFAULT 0");
+    } catch (mysqli_sql_exception $e) {
+        $errno = (int) $e->getCode();
+        if ($errno !== 1060 && $errno !== 1146) {
+            error_log("schema migration warning ({$errno}): " . $e->getMessage());
         }
     }
 }
