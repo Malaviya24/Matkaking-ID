@@ -132,6 +132,14 @@ if (isset($_POST['single_submit']) && isset($_SESSION['usr_id'])!="") {
                 
                 <?php
                 include_once(__DIR__ . '/include/scraped-market-game-setup.php');
+                // Half Sangam needs both open_ank and close_panna (or open_panna
+                // and close_ank), so a "close-session" half-sangam bet has no
+                // meaningful settlement path. Once the open result is declared,
+                // hide the form for this market.
+                if ($is_scraped_market && !empty($open_result_declared)) {
+                    $bidding_status = 0;
+                    $msg = 'Half Sangam betting closed for today';
+                }
                 if (!$is_scraped_market) {
                 $games_list_qry =  "SELECT * FROM `parent_games` WHERE id=$parent_game_id and status=1";
 				$games = mysqli_query($con, $games_list_qry);
@@ -199,7 +207,7 @@ if (isset($_POST['single_submit']) && isset($_SESSION['usr_id'])!="") {
                     </h3>
                     <span class="text-muted" style="font-size: 13px;"><i class="fa fa-clock-o"></i> Select Market & Place Bid</span>
                 </div>
-                <?php if($is_scraped_market && $bidding_status){ include(__DIR__ . '/include/scraped-market-form-header.php'); } elseif($default_bidding_game =='open'){ ?>
+                <?php if($is_scraped_market && $bidding_status){ $sm_force_open_only = true; include(__DIR__ . '/include/scraped-market-form-header.php'); } elseif($default_bidding_game =='open'){ ?>
                 
                 <div class="row bidoptions-list tb-10">
                                 <div class="col-6">

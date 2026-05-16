@@ -123,6 +123,13 @@ if (isset($_POST['single_submit']) && isset($_SESSION['usr_id'])!="") {
                 
                 <?php
                 include_once(__DIR__ . '/include/scraped-market-game-setup.php');
+                // jodi can only be settled when both open_ank and close_ank are
+                // known, so a "close-session" jodi bet has no meaningful path.
+                // Once the open result is declared, hide the form for this market.
+                if ($is_scraped_market && !empty($open_result_declared)) {
+                    $bidding_status = 0;
+                    $msg = 'Jodi betting closed for today';
+                }
                 if (!$is_scraped_market) {
                 $games_list_qry =  "SELECT * FROM `parent_games` WHERE id=$parent_game_id and status=1";
 				$games = mysqli_query($con, $games_list_qry);
@@ -190,35 +197,35 @@ if (isset($_POST['single_submit']) && isset($_SESSION['usr_id'])!="") {
                     </h3>
                     <span class="text-muted" style="font-size: 13px;"><i class="fa fa-clock-o"></i> Select Market & Place Bid</span>
                 </div>
-                <?php if($is_scraped_market && $bidding_status){ include(__DIR__ . '/include/scraped-market-form-header.php'); } elseif($default_bidding_game =='open'){?>
-                
+                <?php if($is_scraped_market && $bidding_status){ $sm_force_open_only = true; include(__DIR__ . '/include/scraped-market-form-header.php'); } elseif($default_bidding_game =='open'){?>
+
                 <div class="row bidoptions-list tb-10">
                                 <div class="col-6">
                                   <a class="dateGameIDbox">
                                       <p><?php echo date('d/m/Y');?></p>
                                   </a>
                                 </div>
-                                
+
                                 <div class="col-6">
                                     <select class="dateGameIDbox" name="game_id">
                                         <option value="<?php echo $child_open;?>"> <?php echo get_gameNameById($child_open);?></option>
                                     </select>
                                 </div>
-                                
+
                 </div>
-                
+
                 <?php }else{ ?>
-                
+
                 <div class="tbmar-40 text-center">
                     <p>Sorry! Bidding is Close for <?php echo $game_name;?>. <br> Try again Tomorrow.</p>
                 </div>
-                
+
                 <?php } ?>
-                
-                
+
+
                 <?php if($bidding_status){?>
                 <div class="tb-10"><hr class="devider"></div>
-                
+
                 <h3 class="subheading">Select Amount</h3>
                 <div class="row bidoptions-list tb-10">
                                 <div class="col-3">
